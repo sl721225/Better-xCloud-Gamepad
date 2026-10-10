@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Better xCloud Gamepad v14 (模組重建版)
 // @namespace    http://tampermonkey.net/
-// @version      15.0.0
+// @version      15.0.1
 // @updateURL    https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
 // @downloadURL  https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
@@ -13,7 +13,7 @@
 // ==/UserScript==
 
 /*
- * v15.0.0 — 完整單檔，無外部相依。巨集時間軸、快捷列、輸入曲線、映射與完整備份。
+ * v15.0.1 — 修正右鍵由連發切換鎖定時缺少放開邊緣，保留 v15 完整功能。
  * 沿用 v14 的名稱、namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -24,7 +24,7 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.0.0';
+    const VERSION = '15.0.1';
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(Number(v)) ? Number(v) : 0));
     const clone = value => JSON.parse(JSON.stringify(value));
     const slots = factory => Object.fromEntries(Array.from({length: 6}, (_, i) => [i + 1, factory()]));
@@ -198,8 +198,10 @@
         constructor(input,config,clock) {this.input=input; this.config=config; this.clock=clock; this.modes=new Map(); this.pulses=new Map();}
         mode(id) {return this.modes.get(Number(id))?.mode||'none';}
         set(id,mode) {
-            id=Number(id); this.input.clear(`auto:${id}`); this.modes.delete(id);
-            if(mode==='hold'||mode==='interval') this.modes.set(id,{mode,start:this.clock()});
+            id=Number(id);const previous=this.mode(id),now=this.clock(); this.input.clear(`auto:${id}`); this.modes.delete(id);
+            // 連發可能正處於按下階段；同步清除再按下不會被遊戲輪詢看到。
+            // 切成鎖定前輸出短暫放開，再持續按下，讓遊戲收到新的按下邊緣。
+            if(mode==='hold'||mode==='interval') this.modes.set(id,{mode,start:now,activateAt:now+(previous==='interval'&&mode==='hold'?80:0)});
             this.tick(this.clock());
         }
         cycle(id) {this.set(id,{none:'interval',interval:'hold',hold:'none'}[this.mode(id)]);}
@@ -208,7 +210,7 @@
         tick(now) {
             for(const [id,m] of this.modes) {
                 const delay=this.config.prefs.delay;
-                const on=m.mode==='hold'||(now-m.start)%delay<Math.min(100,delay*0.4);
+                const on=now>=(m.activateAt??m.start)&&(m.mode==='hold'||(now-m.start)%delay<Math.min(100,delay*0.4));
                 this.input.set(`auto:${id}`,'btn',id,on?1:0,20);
             }
             for(const [key,p] of this.pulses) if(now>=p.end) {this.pulses.delete(key);this.input.clear(key);}
