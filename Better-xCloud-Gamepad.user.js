@@ -1,7 +1,9 @@
 // ==UserScript==
 // @name         Better xCloud Gamepad v14 (模組重建版)
 // @namespace    http://tampermonkey.net/
-// @version      14.1.0
+// @version      15.0.0
+// @updateURL    https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
+// @downloadURL  https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
 // @author       You
 // @match        *://*.xbox.com/*
@@ -11,8 +13,8 @@
 // ==/UserScript==
 
 /*
- * v14.1.0 — 完整單檔，無外部相依。頂部巨集、說明開關、巨集命名與 JSON 備份／還原。
- * 沿用 v14 的儲存 key。備份檔只包含巨集，不包含佈局／介面設定。
+ * v15.0.0 — 完整單檔，無外部相依。巨集時間軸、快捷列、輸入曲線、映射與完整備份。
+ * 沿用 v14 的名稱、namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
  * 紅色「全停」：停止巨集、AFK、連發、鎖定與手動輸入。
@@ -22,7 +24,7 @@
  */
 (function () {
     'use strict';
-    const VERSION = '14.1.0';
+    const VERSION = '15.0.0';
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(Number(v)) ? Number(v) : 0));
     const clone = value => JSON.parse(JSON.stringify(value));
     const slots = factory => Object.fromEntries(Array.from({length: 6}, (_, i) => [i + 1, factory()]));
@@ -33,7 +35,12 @@
         stick_0:'leftStick','10':'leftStick',stick_2:'rightStick','11':'rightStick'};
     const DEFAULTS = () => ({delay:3000, bgTrans:false, afkAmp:0.2, gameMode:'standard', comboTaps:false, racingAutoFade:true, showHelp:true,
         splitMode:false, uiScale:1, showViewer:false, viewerScale:0.8, viewerPos:{x:'20px',y:'20px'},
-        panelPos:null, layoutSlot:1, layouts:slots(() => ({})), macros:slots(() => ({name:'',duration:0,events:[]}))});
+        panelPos:null, layoutSlot:1, layouts:slots(() => ({})), macros:slots(() => ({name:'',duration:0,events:[]})),
+        layoutNames:slots(()=>''),axisTuning:[0,1].map(()=>({deadzone:0,sensitivity:1,max:1,curve:'linear',invertX:false,invertY:false})),
+        buttonMap:Array.from({length:17},(_,i)=>i),physicalMapping:false,macroSpeed:1,
+        keyboardMacros:false,comboMacros:false,showQuickbar:true,quickbarCollapsed:true,
+        macroKeys:['F3','F4','F5','F6','F7','F8'],macroCombos:[[4,0],[4,1],[4,2],[4,3],[5,0],[5,1]],
+        emergencyKey:'F9',emergencyEnabled:true,holdTimeout:0,playbackLimit:0});
 
     class ConfigStore {
         constructor(storage, warn = console.warn) {
@@ -42,7 +49,22 @@
         }
         sanitize(data) {
             const p = DEFAULTS(); const d = data && typeof data === 'object' ? data : {};
-            ['bgTrans','comboTaps','splitMode','showViewer','racingAutoFade','showHelp'].forEach(k => {if (typeof d[k] === 'boolean') p[k]=d[k];});
+            ['bgTrans','comboTaps','splitMode','showViewer','racingAutoFade','showHelp','physicalMapping','keyboardMacros','comboMacros','showQuickbar','quickbarCollapsed','emergencyEnabled'].forEach(k => {if (typeof d[k] === 'boolean') p[k]=d[k];});
+            p.macroSpeed=d.macroSpeed==null?1:clamp(d.macroSpeed,.25,3);
+            p.holdTimeout=d.holdTimeout==null?0:clamp(d.holdTimeout,0,600);
+            p.playbackLimit=d.playbackLimit==null?0:clamp(d.playbackLimit,0,3600);
+            const validKey=v=>typeof v==='string'&&/^(F(?:[3-9]|1[0-2])|Key[A-Z]|Digit[0-9])$/.test(v);
+            if(validKey(d.emergencyKey))p.emergencyKey=d.emergencyKey;
+            for(let i=0;i<6;i++){
+                if(validKey(d.macroKeys?.[i]))p.macroKeys[i]=d.macroKeys[i];
+                const c=d.macroCombos?.[i];if(Array.isArray(c)&&c.length===2&&c.every(n=>Number.isInteger(n)&&n>=0&&n<17)&&c[0]!==c[1])p.macroCombos[i]=[...c];
+            }
+            for(let i=0;i<17;i++)if(Number.isInteger(d.buttonMap?.[i])&&d.buttonMap[i]>=0&&d.buttonMap[i]<17)p.buttonMap[i]=d.buttonMap[i];
+            for(let i=0;i<2;i++){
+                const t=d.axisTuning?.[i];if(!t||typeof t!=='object')continue;
+                p.axisTuning[i]={deadzone:clamp(t.deadzone??0,0,.45),sensitivity:clamp(t.sensitivity??1,.2,3),max:clamp(t.max??1,.1,1),
+                    curve:['linear','soft','fast'].includes(t.curve)?t.curve:'linear',invertX:t.invertX===true,invertY:t.invertY===true};
+            }
             p.delay = d.delay == null ? p.delay : clamp(d.delay,100,10000);
             p.afkAmp = d.afkAmp == null ? p.afkAmp : clamp(d.afkAmp,0.1,0.5);
             p.gameMode = d.gameMode === 'racing' ? 'racing' : 'standard';
@@ -53,6 +75,7 @@
                 ? {x:`${clamp(parseFloat(v.x),-20000,20000)}px`,y:`${clamp(parseFloat(v.y),-20000,20000)}px`} : null;
             p.viewerPos = point(d.viewerPos) || p.viewerPos; p.panelPos = point(d.panelPos);
             for (let s=1;s<=6;s++) {
+                if(typeof d.layoutNames?.[s]==='string')p.layoutNames[s]=d.layoutNames[s].trim().slice(0,60);
                 const layout = d.layouts?.[s];
                 for (const id of [...Object.keys(GROUPS),'16']) {
                     const pos = layout?.[id];
@@ -76,14 +99,14 @@
                 if (!raw) continue;
                 try {
                     const doc = JSON.parse(raw);
-                    if (key===this.key && doc.version>14) {this.writable=false; this.warn('設定來自較新版本，停止覆寫。');}
+                    if (key===this.key && doc.version>15) {this.writable=false; this.warn('設定來自較新版本，停止覆寫。');}
                     this.prefs=this.sanitize(doc.settings || doc); return;
                 } catch (e) {this.warn(`設定 ${key} 無法解析；保留原始內容。`,e); if(key===this.key) this.writable=false;}
             }
         }
         save() {
             if(!this.writable) return false;
-            try {this.storage.setItem(this.key,JSON.stringify({version:14,build:VERSION,settings:this.prefs})); return true;}
+            try {this.storage.setItem(this.key,JSON.stringify({version:15,build:VERSION,settings:this.prefs})); return true;}
             catch(e) {this.warn('設定儲存失敗；目前操作仍可使用，請勿重新整理。',e); return false;}
         }
     }
@@ -144,7 +167,7 @@
             if(changed||!this.pad.timestamp) this.pad.timestamp=this.input.clock();
         }
         install() {
-            this.hook=()=>{const pads=this.readPhysical(); this.sync(pads); pads[this.slot]=this.pad; return pads;};
+            this.hook=()=>{const pads=this.readPhysical(); this.sync(pads);const out=pads.map(p=>this.pipeline?.physical(p)||p);out[this.slot]=this.pad;return out;};
             Object.defineProperty(this.nav,'getGamepads',{value:this.hook,configurable:true,writable:true});
             this.sync(this.readPhysical());
         }
@@ -227,13 +250,13 @@
         play(loop=false) {
             this.stop(); const m=this.config.prefs.macros[this.slot]; if(!m.events.length) return false;
             this.data=clone(m); this.data.duration=Math.max(1,this.data.duration,this.data.events.at(-1).t);
-            this.playing=true;this.loop=loop;this.index=0;this.playStart=this.clock();this.tick(this.playStart);return true;
+            this.speed=this.config.prefs.macroSpeed||1;this.playing=true;this.loop=loop;this.index=0;this.playStart=this.clock();this.runStart=this.playStart;this.tick(this.playStart);return true;
         }
         tick(now) {
             if(!this.playing) return;
-            let elapsed=now-this.playStart;
+            let elapsed=(now-this.playStart)*(this.speed||1);
             if(elapsed>=this.data.duration&&this.loop) {
-                this.playStart+=Math.floor(elapsed/this.data.duration)*this.data.duration;
+                this.playStart+=Math.floor(elapsed/this.data.duration)*this.data.duration/(this.speed||1);
                 elapsed=now-this.playStart;this.index=0;this.input.clear('macro');
             }
             while(this.index<this.data.events.length&&this.data.events[this.index].t<=elapsed) {
@@ -298,6 +321,115 @@
             config.prefs.macros={...previous};for(const item of plan)config.prefs.macros[item.slot]=clone(item.value);
             if(!config.save()){config.prefs.macros=previous;throw Error('儲存失敗，已保留原本的巨集；請先匯出備份並檢查網站儲存空間。');}
             return plan.length;
+        }
+    }
+
+    class InputPipeline {
+        constructor(config) {this.config=config;}
+        process(raw) {
+            const out=blank(),p=this.config.prefs;
+            raw.buttons.forEach((v,i)=>{const target=p.buttonMap[i];out.buttons[target]=Math.max(out.buttons[target],v);});
+            for(let side=0;side<2;side++){
+                const t=p.axisTuning[side],x=raw.axes[side*2],y=raw.axes[side*2+1],r=Math.hypot(x,y);
+                if(t.deadzone===0&&t.sensitivity===1&&t.max===1&&t.curve==='linear') {
+                    out.axes[side*2]=x*(t.invertX?-1:1);out.axes[side*2+1]=y*(t.invertY?-1:1);continue;
+                }
+                if(r<=t.deadzone)continue;
+                let magnitude=clamp((Math.min(1,r)-t.deadzone)/(1-t.deadzone),0,1);
+                if(t.curve==='soft')magnitude=magnitude*magnitude;
+                if(t.curve==='fast')magnitude=Math.sqrt(magnitude);
+                magnitude=Math.min(t.max,magnitude*t.sensitivity);
+                out.axes[side*2]=x/r*magnitude*(t.invertX?-1:1);out.axes[side*2+1]=y/r*magnitude*(t.invertY?-1:1);
+            }
+            return out;
+        }
+        physical(pad) {
+            if(!this.config.prefs.physicalMapping||!pad)return pad;
+            const buttons=Array.from({length:17},(_,i)=>clamp(pad.buttons[i]?.value??(pad.buttons[i]?.pressed?1:0),0,1));
+            const out=this.process({buttons,axes:Array.from({length:4},(_,i)=>pad.axes[i]||0)});
+            // 不覆寫原生 Gamepad；回傳保留 index、id 等資料的代理。
+            return new Proxy(pad,{get:(target,key)=>key==='buttons'?out.buttons.map(value=>({value,pressed:value>.05,touched:value>0})):key==='axes'?out.axes:Reflect.get(target,key,target)});
+        }
+    }
+
+    class ConfigurationBackup {
+        static groups=['macros','layouts','settings'];
+        static settingKeys=Object.keys(DEFAULTS()).filter(k=>!['macros','layouts','layoutNames'].includes(k));
+        static encode(config) {const doc={format:'better-xcloud-config',version:1,appVersion:VERSION,exportedAt:new Date().toISOString(),settings:clone(config.prefs)};this.validate(doc);return JSON.stringify(doc,null,2);}
+        static validate(doc) {
+            if(!doc||doc.format!=='better-xcloud-config'||doc.version!==1||!doc.settings||Array.isArray(doc.settings))throw Error('不是支援的完整備份（格式版本 1）。');
+            if(new TextEncoder().encode(JSON.stringify(doc)).length>MacroBackup.MAX_BYTES)throw Error('備份超過 16 MB。');
+            const d=doc.settings,defaults=DEFAULTS();
+            for(const key of Object.keys(defaults))if(!(key in d))throw Error(`備份缺少 ${key}。`);
+            MacroBackup.validate({format:'better-xcloud-macros',version:1,macros:[1,2,3,4,5,6].map(slot=>({slot,...d.macros?.[slot]}))});
+            for(let s=1;s<=6;s++){
+                if(!d.layouts?.[s]||Array.isArray(d.layouts[s])||typeof d.layoutNames?.[s]!=='string'||d.layoutNames[s].length>60)throw Error('佈局資料不完整。');
+                for(const [id,v] of Object.entries(d.layouts[s]))if(![...Object.keys(GROUPS),'16'].includes(id)||!v||!Number.isFinite(v.x)||!Number.isFinite(v.y)||Math.abs(v.x)>10000||Math.abs(v.y)>10000)throw Error(`佈局 ${s} 有無效位移。`);
+            }
+            const checked=new ConfigStore({getItem:()=>null,setItem:()=>{}},()=>{}).sanitize(d);
+            // 備份用嚴格驗證：不容許無效數值被靜默修正。
+            const equal=(a,b)=>a===b||(a&&b&&typeof a==='object'&&typeof b==='object'&&Array.isArray(a)===Array.isArray(b)&&Object.keys(a).length===Object.keys(b).length&&Object.keys(a).every(k=>Object.hasOwn(b,k)&&equal(a[k],b[k])));
+            for(const key of this.settingKeys)if(!equal(d[key],checked[key]))throw Error(`設定 ${key} 無效。`);
+            if(new Set(d.macroKeys).size!==6||d.macroKeys.includes(d.emergencyKey))throw Error('巨集快捷鍵重複，或與急停鍵衝突。');
+            if(new Set(d.macroCombos.map(c=>[...c].sort((a,b)=>a-b).join(','))).size!==6)throw Error('巨集組合鍵重複。');
+            return checked;
+        }
+        static parse(text) {if(new TextEncoder().encode(text).length>MacroBackup.MAX_BYTES)throw Error('備份超過 16 MB。');let d;try{d=JSON.parse(text.replace(/^\uFEFF/,''));}catch{throw Error('JSON 無法解析。');}return this.validate(d);}
+        static commit(config,data,groups) {
+            if(!groups.length||groups.some(g=>!this.groups.includes(g)))throw Error('請選擇還原項目。');
+            const valid=this.validate({format:'better-xcloud-config',version:1,settings:data}),old=clone(config.prefs),next=clone(old);
+            if(groups.includes('macros'))next.macros=valid.macros;
+            if(groups.includes('layouts')){next.layouts=valid.layouts;next.layoutNames=valid.layoutNames;}
+            if(groups.includes('settings'))for(const key of this.settingKeys)next[key]=valid[key];
+            Object.assign(config.prefs,next);if(!config.save()){Object.assign(config.prefs,old);throw Error('儲存失敗，已還原原資料。');}
+        }
+    }
+
+    class MacroTimeline {
+        static normalize(value) {
+            const copy=clone(value);copy.events.sort((a,b)=>a.t-b.t);
+            return MacroBackup.validate({format:'better-xcloud-macros',version:1,macros:[{slot:1,...copy}]}).macros[0];
+        }
+        static save(config,slot,draft) {
+            const valid=this.normalize(draft),old=config.prefs.macros[slot];
+            config.prefs.macros[slot]={name:valid.name,duration:valid.duration,events:valid.events};
+            if(!config.save()){config.prefs.macros[slot]=old;throw Error('儲存失敗，原巨集未更動。');}
+        }
+    }
+
+    class ShortcutManager {
+        constructor(app) {
+            this.app=app;this.comboHeld=new Set();this.keyHeld=new Set();this.blocked=new Set();this.holdSince=new Map();
+            window.addEventListener('keydown',e=>{
+                const p=app.config.prefs;
+                if(p.emergencyEnabled&&e.code===p.emergencyKey&&!e.repeat){e.preventDefault();app.stopAll();app.notice('急停：已釋放所有虛擬輸入。');return;}
+                const editing=e.composedPath().some(n=>n?.matches?.('input,select,textarea,[contenteditable=true]'));
+                if(e.repeat||editing||e.ctrlKey||e.altKey||e.metaKey||e.shiftKey||!p.keyboardMacros||this.keyHeld.has(e.code))return;
+                const slot=p.macroKeys.indexOf(e.code)+1;if(!slot)return;
+                if(app.macro.recording||app.layout.editing)return;e.preventDefault();this.keyHeld.add(e.code);app.playMacro(false,slot);
+            },{signal:app.signal,capture:true});
+            window.addEventListener('keyup',e=>this.keyHeld.delete(e.code),{signal:app.signal});
+            window.addEventListener('blur',()=>{this.keyHeld.clear();this.comboHeld.clear();},{signal:app.signal});
+        }
+        tick(now) {
+            const a=this.app,p=a.config.prefs;
+            if(p.playbackLimit&&a.macro.playing&&now-a.macro.runStart>=p.playbackLimit*1000){a.macro.stop();a.notice('巨集已達播放時間上限，已停止。');}
+            const present=new Set();
+            for(const [key,state] of a.input.sources){
+                if(!/^(manual:|race:)/.test(key))continue;present.add(key);
+                const held=[...state.buttons.values()].some(v=>v>.05);
+                if(!held){this.holdSince.delete(key);continue;}
+                if(!this.holdSince.has(key))this.holdSince.set(key,now);
+                if(p.holdTimeout&&now-this.holdSince.get(key)>=p.holdTimeout*1000){a.input.clear(key);this.blocked.add(key);this.holdSince.delete(key);a.notice('長按已達保護上限；請放開後重新操作。');}
+            }
+            for(const key of this.holdSince.keys())if(!present.has(key))this.holdSince.delete(key);
+            if(!p.comboMacros){this.comboHeld.clear();return;}
+            const raw=a.rawSnapshot(key=>key!=='macro'&&key!=='afk'&&!key.startsWith('auto:'));
+            raw.buttons=raw.buttons.map((v,i)=>Math.max(v,a.physical.state.buttons[i]));
+            // 先鎖存整組，播放造成的輸入清除不會在同一幀重複觸發。
+            const active=p.macroCombos.map(c=>c.every(id=>raw.buttons[id]>.5));let trigger=0;
+            active.forEach((on,i)=>{if(on&&!this.comboHeld.has(i)&&!trigger)trigger=i+1;if(on)this.comboHeld.add(i);else this.comboHeld.delete(i);});
+            if(trigger&&!a.macro.recording&&!a.layout.editing)a.playMacro(false,trigger);
         }
     }
 
@@ -428,7 +560,7 @@
             this.app=app;this.config=app.config;this.p=this.config.prefs;this.root=el('section','panel');
             this.root.setAttribute('aria-label','虛擬手把控制面板');this.collapsed=false;this.tab=null;this.dirty=true;
             this.buttons=[];this.sticks=[];this.tapStates=new Map();
-            this.header=el('div','header');this.drag=el('span','brand','⠿  XCLOUD / 14');
+            this.header=el('div','header');this.drag=el('span','brand','⠿  XCLOUD / 15');
             this.collapseBtn=button('收合',()=>{app.pointers.cancelAll();this.collapsed=!this.collapsed;this.refresh();});
             this.modeBtn=button('',()=>app.changeMode());this.toolBtn=button('工具',()=>this.openTab(this.tab&&this.tab!=='macro'?null:'settings'));
             this.macroQuick=button('巨集',()=>this.openTab(this.tab==='macro'&&!this.collapsed?null:'macro'));
@@ -654,7 +786,7 @@
             this.controls.hidden=this.collapsed;this.help.hidden=this.collapsed;this.raceHint.hidden=this.collapsed||!racing;
             this.tabs.hidden=this.tools.hidden=this.collapsed||!this.tab;
             for(const [key,page] of Object.entries(this.pages)){page.hidden=key!==this.tab;this.tabButtons[key].classList.toggle('on',key===this.tab);}
-            this.layoutSlots.forEach((b,i)=>b.classList.toggle('on',this.p.layoutSlot===i+1));
+            this.layoutSlots.forEach((b,i)=>{b.classList.toggle('on',this.p.layoutSlot===i+1);b.textContent=`${i+1}${this.p.layoutNames[i+1]?' '+this.p.layoutNames[i+1]:''}`;b.title=this.p.layoutNames[i+1]||`佈局 ${i+1}`;});
             this.editBtn.textContent=this.app.layout.editing?'完成編輯':'開始編輯';this.editBtn.classList.toggle('on',this.app.layout.editing);
             this.groupBtn.textContent=this.app.layout.group?'群組移動':'單顆移動';this.snapBtn.textContent=this.app.layout.snap?'磁吸 10px':'自由移動';
             this.groupBtn.classList.toggle('on',this.app.layout.group);this.snapBtn.classList.toggle('on',this.app.layout.snap);
@@ -715,6 +847,211 @@
         }
     }
 
+    class AdvancedTools {
+        constructor(app) {
+            this.app=app;this.panel=app.panel;this.p=app.config.prefs;this.urls=new Set();this.fileToken=0;this.lastTick=0;
+            const style=el('style');style.textContent=`
+            .v15-card{margin-top:10px;padding:9px;border:1px solid var(--line);border-radius:10px;font-size:11px}.v15-card h3{font-size:12px;margin:0 0 8px;color:var(--green)}
+            .v15-card input,.v15-card textarea{background:#182634;color:inherit;border:1px solid var(--line);border-radius:5px;padding:5px;font:inherit;user-select:text}
+            .v15-card input[type=number]{width:80px}.v15-card input[type=checkbox]{width:auto}.v15-card select{max-width:180px}
+            .v15-table{width:100%;border-collapse:collapse;font-size:10px}.v15-table th,.v15-table td{text-align:left;padding:4px;border-bottom:1px solid var(--line)}.v15-table input[type=number]{width:65px}.v15-table select{max-width:80px;padding:4px}
+            .v15-scroll{overflow:auto;max-height:260px}.v15-message{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;margin:6px 0}.v15-message:empty{display:none}
+            .quickbar{position:fixed;right:8px;top:35%;z-index:6;pointer-events:auto;background:#111c29e8;border:1px solid var(--line);border-radius:12px;padding:6px;max-width:155px;max-height:65vh;overflow:auto}
+            .quickbar button{display:block;width:100%;margin:3px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.v15-diagnostics{white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.6 monospace;user-select:text}
+            `;app.shadow.append(style);
+            this.addPage('input','輸入',this.inputPage());this.addPage('shortcuts','快捷／保護',this.shortcutPage());this.addPage('backup','備份',this.backupPage());this.addPage('diagnostics','診斷',this.diagnosticPage());
+            this.panel.pages.macro.append(this.editorPage());this.panel.pages.layout.append(this.layoutPage());
+            this.quickbar=el('aside','quickbar');this.quickbar.setAttribute('aria-label','巨集快捷列');
+            this.quickToggle=button('巨集 ▸',()=>{this.p.quickbarCollapsed=!this.p.quickbarCollapsed;app.config.save();this.syncQuickbar();});this.quickItems=el('div');this.quickButtons=[];
+            for(let s=1;s<=6;s++){const b=button(`${s}`,()=>app.playMacro(false,s));this.quickButtons.push(b);this.quickItems.append(b);}
+            this.quickItems.append(button('■ 全停',()=>app.stopAll(),'danger'));this.quickbar.append(this.quickToggle,this.quickItems);app.shadow.append(this.quickbar);
+            app.signal.addEventListener('abort',()=>{this.fileToken++;for(const url of this.urls)URL.revokeObjectURL(url);this.urls.clear();},{once:true});
+            this.panel.refresh();this.syncQuickbar();
+        }
+        addPage(key,label,page) {const b=button(label,()=>this.panel.openTab(key));this.panel.tabButtons[key]=b;this.panel.tabs.append(b);this.panel.pages[key]=page;this.panel.tools.append(page);}
+        card(title,parent) {const c=el('section','v15-card');c.append(el('h3','',title));parent?.append(c);return c;}
+        message(parent) {const n=el('div','v15-message');n.setAttribute('role','status');parent.append(n);return n;}
+        busy() {return this.app.macro.playing||this.app.macro.recording;}
+        requireIdle() {if(this.busy()||this.app.layout.editing)throw Error('請先停止巨集並完成佈局編輯，再進行此操作。');}
+        attempt(message,fn) {try{if(fn()===false){message.textContent='已取消。';return false;}message.textContent='已儲存。';this.panel.refresh();this.syncQuickbar();return true;}catch(e){message.textContent=e.message;return false;}}
+        saveChange(fn) {
+            const old=clone(this.p);this.app.stopAll();
+            try{fn();if(!this.app.config.save())throw Error('儲存失敗，已恢復原設定。');}
+            catch(e){Object.assign(this.p,old);throw e;}
+        }
+        select(parent,label,values,current,onChange) {
+            const row=el('label','setting');row.append(el('span','',label));const s=el('select');s.setAttribute('aria-label',label);
+            values.forEach(([value,title])=>{const o=el('option','',title);o.value=String(value);s.append(o);});s.value=String(current);
+            let previous=s.value;s.onchange=()=>{if(onChange(s.value)===false)s.value=previous;else previous=s.value;};row.append(s);parent.append(row);return s;
+        }
+        number(parent,label,value,min,max,step,onChange) {
+            const row=el('label','setting');row.append(el('span','',label));const n=el('input');n.type='number';n.required=true;n.value=String(value);n.min=min;n.max=max;n.step=step;n.setAttribute('aria-label',label);
+            let previous=n.value;n.onchange=()=>{if(n.value===''||!n.checkValidity()){this.app.notice(`${label}：請輸入 ${min}～${max} 的有效數值。`);return;}if(onChange(Number(n.value))===false)n.value=previous;else previous=n.value;};row.append(n);parent.append(row);return n;
+        }
+        check(parent,label,value,onChange) {const row=el('label','setting'),n=el('input');n.type='checkbox';n.checked=value;n.setAttribute('aria-label',label);let previous=n.checked;n.onchange=()=>{if(onChange(n.checked)===false)n.checked=previous;else previous=n.checked;};row.append(el('span','',label),n);parent.append(row);return n;}
+        inputPage() {
+            const page=el('div');this.tuningSide=0;const c=this.card('搖桿曲線與死區',page);this.tuningBody=el('div');this.tuningMessage=this.message(c);
+            this.select(c,'調整搖桿',[[0,'LS 左搖桿'],[1,'RS 右搖桿']],0,v=>{this.tuningSide=Number(v);this.renderTuning();});c.append(this.tuningBody);this.renderTuning();
+            const map=this.card('按鍵重新映射',page);this.mappingMessage=this.message(map);
+            this.check(map,'實體手把也套用映射與曲線',this.p.physicalMapping,on=>this.attempt(this.mappingMessage,()=>this.saveChange(()=>this.p.physicalMapping=on)));
+            map.append(el('div','hint','預設只改虛擬輸出。錄製保存原始動作，播放時才套用目前設定。實體映射直接修改回傳資料，不額外建立第二份手把輸入。'));
+            const rows=el('div','v15-scroll');this.mapSelects=[];
+            LABELS.forEach((name,id)=>this.mapSelects.push(this.select(rows,`${name} →`,LABELS.map((title,value)=>[value,title]),this.p.buttonMap[id],v=>this.attempt(this.mappingMessage,()=>this.saveChange(()=>this.p.buttonMap[id]=Number(v))))));
+            map.append(rows,button('還原按鍵映射',()=>this.attempt(this.mappingMessage,()=>{this.requireIdle();this.saveChange(()=>this.p.buttonMap=LABELS.map((_,i)=>i));this.mapSelects.forEach((s,i)=>s.value=i);})));return page;
+        }
+        renderTuning() {
+            const body=this.tuningBody;body.replaceChildren();const t=this.p.axisTuning[this.tuningSide];
+            const presets={standard:{deadzone:0,sensitivity:1,max:1,curve:'linear'},aim:{deadzone:.08,sensitivity:.8,max:1,curve:'soft'},racing:{deadzone:.04,sensitivity:1,max:1,curve:'soft'},fast:{deadzone:.08,sensitivity:1.2,max:1,curve:'fast'}};
+            this.select(body,'常用預設',[['custom','手動調整'],['standard','標準（相容舊版）'],['aim','細膩瞄準'],['racing','柔和轉向'],['fast','快速反應']],'custom',v=>{if(v==='custom')return;this.attempt(this.tuningMessage,()=>this.saveChange(()=>Object.assign(this.p.axisTuning[this.tuningSide],presets[v])));this.renderTuning();});
+            const change=(key,value)=>this.attempt(this.tuningMessage,()=>this.saveChange(()=>this.p.axisTuning[this.tuningSide][key]=value));
+            this.number(body,'死區（0～0.45）',t.deadzone,0,.45,.01,v=>change('deadzone',v));this.number(body,'靈敏度（0.2～3）',t.sensitivity,.2,3,.05,v=>change('sensitivity',v));this.number(body,'最大輸出（0.1～1）',t.max,.1,1,.05,v=>change('max',v));
+            this.select(body,'曲線',[['linear','線性'],['soft','柔和'],['fast','快速']],t.curve,v=>change('curve',v));this.check(body,'反轉 X 軸',t.invertX,v=>change('invertX',v));this.check(body,'反轉 Y 軸',t.invertY,v=>change('invertY',v));
+            body.append(el('div','hint','死區使用圓形計算，預設參數保留舊版操作感。修改輸入設定時會停止目前自動操作。'));
+        }
+        shortcutPage() {
+            const page=el('div'),c=this.card('巨集快捷啟動',page);this.shortcutMessage=this.message(c);
+            const toggle=(key,on)=>this.attempt(this.shortcutMessage,()=>this.saveChange(()=>this.p[key]=on));
+            this.check(c,'鍵盤巨集快捷鍵',this.p.keyboardMacros,v=>toggle('keyboardMacros',v));this.check(c,'手把組合鍵巨集',this.p.comboMacros,v=>toggle('comboMacros',v));this.check(c,'顯示側邊巨集快捷列',this.p.showQuickbar,v=>toggle('showQuickbar',v));
+            c.append(el('div','hint','鍵盤與組合鍵預設關閉。組合鍵不會吃掉原遊戲輸入；有衝突時請關閉。按住只啟動一次，放開後才能再觸發；輸入文字時不啟動鍵盤巨集。'));
+            const keyValues=[...Array.from({length:10},(_,i)=>`F${i+3}`),...Array.from({length:26},(_,i)=>`Key${String.fromCharCode(65+i)}`),...Array.from({length:10},(_,i)=>`Digit${i}`)].map(v=>[v,v]);
+            for(let i=0;i<6;i++){
+                const group=this.card(`巨集 ${i+1}`,c);this.select(group,`巨集 ${i+1} 鍵盤`,keyValues,this.p.macroKeys[i],v=>this.attempt(this.shortcutMessage,()=>{
+                    if(this.p.macroKeys.some((k,j)=>j!==i&&k===v)||v===this.p.emergencyKey)throw Error('快捷鍵不能重複或與急停相同。');this.saveChange(()=>this.p.macroKeys[i]=v);
+                }));
+                for(let j=0;j<2;j++)this.select(group,`巨集 ${i+1} 組合鍵 ${j+1}`,LABELS.map((v,k)=>[k,v]),this.p.macroCombos[i][j],v=>this.attempt(this.shortcutMessage,()=>{
+                    const combo=[...this.p.macroCombos[i]];combo[j]=Number(v);if(combo[0]===combo[1])throw Error('組合键需選兩個不同按鍵。');
+                    if(this.p.macroCombos.some((k,n)=>n!==i&&[...k].sort().join() === [...combo].sort().join()))throw Error('組合鍵已用於其他巨集。');
+                    if(combo.includes(10)&&combo.includes(11))throw Error('L3＋R3 保留給面板快捷操作。');this.saveChange(()=>this.p.macroCombos[i]=combo);
+                }));
+            }
+            const safety=this.card('急停與輸入保護',page);this.check(safety,'啟用急停快捷鍵',this.p.emergencyEnabled,v=>toggle('emergencyEnabled',v));
+            this.select(safety,'急停鍵',keyValues,this.p.emergencyKey,v=>this.attempt(this.shortcutMessage,()=>{if(this.p.macroKeys.includes(v))throw Error('急停不可與巨集快捷鍵相同。');this.saveChange(()=>this.p.emergencyKey=v);}));
+            this.number(safety,'手動長按上限（秒，0＝關閉）',this.p.holdTimeout,0,600,1,v=>this.attempt(this.shortcutMessage,()=>this.saveChange(()=>this.p.holdTimeout=v)));
+            this.number(safety,'巨集播放上限（秒，0＝關閉）',this.p.playbackLimit,0,3600,1,v=>this.attempt(this.shortcutMessage,()=>this.saveChange(()=>this.p.playbackLimit=v)));
+            safety.append(el('div','hint','長按保護只限制手動觸控按鍵／油門，不限制刻意鎖定或連發。失焦、隱藏分頁與離線時會全停；全螢幕切換會取消觸控操作。'));return page;
+        }
+        editorPage() {
+            const c=this.card('巨集時間軸編輯器');this.editorMessage=this.message(c);
+            c.append(button('開啟目前槽位草稿',()=>{try{this.requireIdle();if(this.draft&&!confirm('捨棄目前草稿並重新載入？'))return;this.editSlot=this.app.macro.slot;this.draft=clone(this.p.macros[this.editSlot]);this.editPage=0;this.renderEditor();this.editorMessage.textContent=`正在編輯槽位 ${this.editSlot}，尚未取代原巨集。`;}catch(e){this.editorMessage.textContent=e.message;}}));
+            this.editorBody=el('div');c.append(this.editorBody);
+            this.speedSelect=this.select(c,'播放速度',[[.25,'0.25×'],[.5,'0.5×'],[.75,'0.75×'],[1,'1×'],[1.5,'1.5×'],[2,'2×'],[3,'3×']],this.p.macroSpeed,v=>this.attempt(this.editorMessage,()=>this.saveChange(()=>this.p.macroSpeed=Number(v))));return c;
+        }
+        renderEditor() {
+            const body=this.editorBody;body.replaceChildren();if(!this.draft)return;
+            const d=this.draft,info=el('div','meta',`草稿：槽位 ${this.editSlot} · ${d.events.length} 筆`);body.append(info);
+            const name=el('input');name.type='text';name.maxLength=60;name.value=d.name;name.setAttribute('aria-label','草稿名稱');name.onchange=()=>d.name=name.value.trim();body.append(name);
+            this.number(body,'總長度（秒，包含結尾等待）',d.duration/1000,0,86400,.001,v=>d.duration=v*1000);
+            const scroll=el('div','v15-scroll'),table=el('table','v15-table'),head=el('tr');['時間（秒）','動作','按鍵／軸','數值',''].forEach(t=>head.append(el('th','',t)));table.append(head);
+            const pageSize=40,pages=Math.max(1,Math.ceil(d.events.length/pageSize));this.editPage=clamp(this.editPage,0,pages-1);
+            for(let i=this.editPage*pageSize;i<Math.min(d.events.length,(this.editPage+1)*pageSize);i++){
+                const event=d.events[i],tr=el('tr');const cell=node=>{const td=el('td');td.append(node);tr.append(td);};
+                const time=el('input');time.type='number';time.required=true;time.min=0;time.max=86400;time.step=.001;time.value=(event.t/1000).toFixed(3);time.setAttribute('aria-label',`步驟 ${i+1} 時間`);
+                time.onchange=()=>{if(time.value===''||!time.checkValidity()){this.editorMessage.textContent='時間需為有效的非負數。';return;}event.t=Number(time.value)*1000;};cell(time);
+                const type=el('select');for(const [value,label] of [['btn','按鍵'],['axis','搖桿']]){const o=el('option','',label);o.value=value;type.append(o);}type.value=event.type;type.setAttribute('aria-label',`步驟 ${i+1} 類型`);
+                type.onchange=()=>{event.type=type.value;event.id=0;event.val=0;this.renderEditor();};cell(type);
+                const id=el('select');(event.type==='btn'?LABELS:['LS X','LS Y','RS X','RS Y']).forEach((label,value)=>{const o=el('option','',label);o.value=value;id.append(o);});id.value=event.id;id.onchange=()=>event.id=Number(id.value);id.setAttribute('aria-label',`步驟 ${i+1} 按鍵`);cell(id);
+                const value=el('input');value.type='number';value.required=true;value.min=event.type==='btn'?0:-1;value.max=1;value.step='any';value.value=event.val;value.setAttribute('aria-label',`步驟 ${i+1} 數值`);
+                value.onchange=()=>{if(value.value===''||!value.checkValidity()){this.editorMessage.textContent='數值需在按鍵 0～1 或搖桿 -1～1 範圍內。';return;}event.val=Number(value.value);};cell(value);
+                cell(button('刪',()=>{d.events.splice(i,1);this.renderEditor();}));table.append(tr);
+            }
+            scroll.append(table);body.append(scroll);const nav=el('div','row');nav.append(button('上一頁',()=>{this.editPage--;this.renderEditor();}),el('span','meta',`${this.editPage+1} / ${pages}`),button('下一頁',()=>{this.editPage++;this.renderEditor();}));body.append(nav);
+            const row=el('div','row');row.append(button('＋ 插入動作',()=>{if(d.events.length>=MacroBackup.MAX_EVENTS){this.editorMessage.textContent='已達事件上限。';return;}d.events.push({t:d.duration,type:'btn',id:0,val:0});this.editPage=Math.floor((d.events.length-1)/pageSize);this.renderEditor();}),button('依時間排序',()=>{d.events.sort((a,b)=>a.t-b.t);this.renderEditor();}));
+            const shift=el('input');shift.type='number';shift.value=0;shift.step=.001;shift.setAttribute('aria-label','整段平移秒數');row.append(shift,button('整段平移',()=>{const delta=Number(shift.value)*1000;if(shift.value===''||!Number.isFinite(delta)||d.duration+delta<0||d.events.some(e=>e.t+delta<0)){this.editorMessage.textContent='平移後不可產生負時間。';return;}d.events.forEach(e=>e.t+=delta);d.duration+=delta;this.renderEditor();}));body.append(row);
+            body.append(el('div','hint','0＝放開；按鍵／LT／RT 數值 0～1，搖桿 -1～1。保留同時動作的原順序。總長度不得早於最後一步；過長清單分頁顯示。'));
+            const actions=el('div','row');actions.append(button('儲存並取代原巨集',()=>this.attempt(this.editorMessage,()=>{
+                this.requireIdle();if(body.querySelector('input:invalid'))throw Error('請先修正草稿的無效數值。');
+                MacroTimeline.normalize(d);if(!confirm(`以草稿取代槽位 ${this.editSlot} 的巨集？`))return false;MacroTimeline.save(this.app.config,this.editSlot,d);this.draft=null;this.renderEditor();
+            })),button('捨棄草稿',()=>{if(confirm('捨棄未儲存的草稿？')){this.draft=null;this.renderEditor();this.editorMessage.textContent='草稿已捨棄，原巨集不變。';}}));body.append(actions);
+        }
+        layoutPage() {
+            const c=this.card('佈局管理');this.layoutMessage=this.message(c);this.layoutName=el('input');this.layoutName.type='text';this.layoutName.maxLength=60;this.layoutName.setAttribute('aria-label','佈局名稱');this.layoutName.value=this.p.layoutNames[this.p.layoutSlot];
+            this.layoutName.onchange=()=>this.attempt(this.layoutMessage,()=>this.saveChange(()=>this.p.layoutNames[this.p.layoutSlot]=this.layoutName.value.trim()));c.append(this.layoutName);
+            this.layoutTarget=this.select(c,'目的佈局',Array.from({length:6},(_,i)=>[i+1,`佈局 ${i+1}`]),1,()=>{});
+            const row=el('div','row');row.append(button('複製到目的',()=>this.layoutOperation('copy')),button('交換兩組',()=>this.layoutOperation('swap')));c.append(row);
+            this.layoutItem=this.select(c,'還原單一元件',[...this.app.layout.items.keys()].map(id=>[id,id.startsWith('stick_')?(id==='stick_0'?'LS':'RS'):LABELS[Number(id)]]),'0',()=>{});
+            c.append(button('還原此元件',()=>this.attempt(this.layoutMessage,()=>{this.requireIdle();if(!confirm('還原此元件位置？'))return;this.saveChange(()=>delete this.p.layouts[this.p.layoutSlot][this.layoutItem.value]);this.app.layout.apply();})),button('匯出六組佈局',()=>this.download('xcloud-layouts.json',JSON.stringify(this.layoutDocument(),null,2),this.layoutMessage)),button('匯入佈局',()=>this.chooseFile('layouts',this.layoutMessage)));
+            return c;
+        }
+        layoutOperation(kind) {
+            this.attempt(this.layoutMessage,()=>{this.requireIdle();const from=this.p.layoutSlot,to=Number(this.layoutTarget.value);if(from===to)throw Error('請選擇不同目的佈局。');if(!confirm(`${kind==='copy'?'複製覆蓋':'交換'}佈局 ${from} 與 ${to}？`))return;
+                this.saveChange(()=>{const layout=clone(this.p.layouts[from]),name=this.p.layoutNames[from];if(kind==='swap'){this.p.layouts[from]=clone(this.p.layouts[to]);this.p.layoutNames[from]=this.p.layoutNames[to];}this.p.layouts[to]=layout;this.p.layoutNames[to]=name;});this.app.layout.apply();});
+        }
+        layoutDocument() {return {format:'better-xcloud-layouts',version:1,layouts:clone(this.p.layouts),layoutNames:clone(this.p.layoutNames)};}
+        validateLayouts(doc) {
+            if(doc?.format!=='better-xcloud-layouts'||doc.version!==1)throw Error('不是支援的佈局備份。');
+            const merged=clone(this.p);merged.layouts=doc.layouts;merged.layoutNames=doc.layoutNames;
+            const valid=ConfigurationBackup.validate({format:'better-xcloud-config',version:1,settings:merged});return {layouts:valid.layouts,layoutNames:valid.layoutNames};
+        }
+        backupPage() {
+            const page=el('div'),c=this.card('完整設定備份',page);this.backupMessage=this.message(c);const row=el('div','row');
+            row.append(button('匯出完整備份',()=>{try{this.requireIdle();this.download(`xcloud-config-${VERSION}.json`,ConfigurationBackup.encode(this.app.config),this.backupMessage);}catch(e){this.backupMessage.textContent=e.message;}}),button('匯入完整備份',()=>this.chooseFile('config',this.backupMessage)));
+            c.append(row,el('div','hint','備份包含六組巨集、六組佈局、名稱、曲線、映射與介面設定。匯入只保存設定，不會自動啟動巨集／連發。'));
+            this.backupPreview=el('div','v15-card');this.backupPreview.hidden=true;c.append(this.backupPreview);
+            const update=this.card('版本與更新',page);update.append(el('div','meta',`目前版本 ${VERSION}`));this.updateMessage=this.message(update);
+            this.updateButton=button('檢查正式版更新',()=>this.checkUpdate());const releases=el('a','','開啟正式版本下載頁');releases.href='https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest';releases.target='_blank';releases.rel='noopener noreferrer';releases.style.color='var(--green)';update.append(this.updateButton,releases,el('div','hint','只追蹤正式 Release，不使用 main 測試版本。自動更新依腳本管理器設定執行；遊戲中不強制重載。'));
+            return page;
+        }
+        download(name,text,message) {
+            try{if(this.app.destroyed)return;const url=URL.createObjectURL(new Blob([text],{type:'application/json'}));this.urls.add(url);const link=el('a');link.href=url;link.download=name;this.app.shadow.append(link);link.click();link.remove();setTimeout(()=>{URL.revokeObjectURL(url);this.urls.delete(url);},30000);message.textContent='已產生備份，請確認瀏覽器下載。';}catch(e){message.textContent=e.message;}
+        }
+        chooseFile(kind,message) {
+            try{this.requireIdle();}catch(e){message.textContent=e.message;return;}
+            const token=++this.fileToken,input=el('input');input.type='file';input.accept='.json,application/json';input.hidden=true;this.app.shadow.append(input);
+            input.onchange=async()=>{
+                const file=input.files[0];input.remove();if(!file)return;
+                try{this.requireIdle();if(file.size>MacroBackup.MAX_BYTES)throw Error('檔案超過 16 MB。');const text=await file.text();if(token!==this.fileToken||this.app.destroyed)return;this.requireIdle();
+                    if(kind==='config')this.showRestore(ConfigurationBackup.parse(text),message);
+                    else{let doc;try{doc=JSON.parse(text.replace(/^\uFEFF/,''));}catch{throw Error('JSON 無法解析。');}const data=this.validateLayouts(doc);this.showRestore({...clone(this.p),...data},message,['layouts']);}
+                }catch(e){if(token===this.fileToken&&!this.app.destroyed)message.textContent=e.message;}
+            };
+            input.addEventListener('cancel',()=>input.remove(),{once:true});input.click();
+        }
+        showRestore(data,message,allowed=ConfigurationBackup.groups) {
+            this.restorePending=true;this.panel.openTab('backup');const preview=this.backupPreview;preview.replaceChildren();preview.hidden=false;
+            preview.append(el('h3','','還原預覽（尚未寫入）'));
+            for(let s=1;s<=6;s++)preview.append(el('div','meta',`巨集 ${s}：${data.macros[s].name||'未命名'}，${data.macros[s].events.length} 筆；佈局 ${s}：${data.layoutNames[s]||'未命名'}，${Object.keys(data.layouts[s]).length} 個位移`));
+            const choices={};for(const [key,label] of [['macros','六組巨集'],['layouts','六組佈局與名稱'],['settings','介面／曲線／映射／快捷設定']])if(allowed.includes(key))choices[key]=this.check(preview,`還原${label}`,true,()=>{});
+            this.restoreButton=button('確認還原所選項目',()=>{try{this.requireIdle();const groups=Object.keys(choices).filter(k=>choices[k].checked);if(!groups.length)throw Error('請至少選一項。');if(!confirm(`取代目前的 ${groups.join('、')}？空槽也會覆蓋原資料。`))return;
+                this.app.stopAll();ConfigurationBackup.commit(this.app.config,data,groups);this.fileToken++;this.restorePending=false;preview.hidden=true;this.draft=null;this.renderEditor();this.app.layout.apply();this.app.viewer.resize();this.app.changeModeAfterRestore?.();this.panel.refresh();this.refreshControls();this.syncQuickbar();this.backupMessage.textContent='已還原所選資料；自動操作維持停止。';
+            }catch(e){this.backupMessage.textContent=e.message;}});preview.append(this.restoreButton,button('取消還原',()=>{this.fileToken++;this.restorePending=false;preview.hidden=true;this.backupMessage.textContent='已取消，資料沒有變更。';}));message.textContent='檔案驗證完成。';this.panel.refresh();
+        }
+        refreshControls() {
+            // 整個設定頁重新建立，確保還原之後畫面與設定一致。
+            for(const key of ['input','shortcuts']){const old=this.panel.pages[key],next=key==='input'?this.inputPage():this.shortcutPage();old.replaceWith(next);this.panel.pages[key]=next;}
+            this.layoutName.value=this.p.layoutNames[this.p.layoutSlot];this.speedSelect.value=String(this.p.macroSpeed);this.panel.refresh();
+        }
+        async checkUpdate() {
+            this.updateButton.disabled=true;this.updateMessage.textContent='正在查詢正式 Release…';
+            try {
+                const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);this.app.signal.addEventListener('abort',()=>controller.abort(),{once:true});let response;
+                try{response=await fetch('https://api.github.com/repos/sl721225/Better-xCloud-Gamepad/releases/latest',{signal:controller.signal,credentials:'omit',headers:{Accept:'application/vnd.github+json'}});}finally{clearTimeout(timer);}
+                if(!response.ok)throw Error(`GitHub 回應 ${response.status}，請稍後重試或開啟下載頁。`);const release=await response.json();if(this.app.destroyed)return;
+                if(release.draft||release.prerelease||!/^v?\d+\.\d+\.\d+$/.test(release.tag_name))throw Error('未找到有效的正式版本。');
+                const latest=release.tag_name.replace(/^v/,''),a=latest.split('.').map(Number),b=VERSION.split('.').map(Number);let newer=false;for(let i=0;i<3;i++){if(a[i]!==b[i]){newer=a[i]>b[i];break;}}
+                this.updateMessage.textContent=newer?`有新版本 ${latest}\n${String(release.body||'').slice(0,3000)}\n請透過腳本管理器更新，或開啟正式版本下載頁。`:`正式版為 ${latest}；目前 ${VERSION} ${latest===VERSION?'已是最新版':'比公開正式版新，尚在測試'}。`;
+            }catch(e){if(!this.app.destroyed)this.updateMessage.textContent=e.name==='AbortError'?'查詢逾時，請稍後再試。':e.message;}
+            finally{if(!this.app.destroyed)this.updateButton.disabled=false;}
+        }
+        diagnosticPage() {
+            const page=el('div'),c=this.card('輸入測試中心',page);c.append(el('div','hint','RAW：虛擬原始輸入；OUT：套用曲線與映射後的虛擬輸出。實體原始與處理後數值分開列出，不宣稱可量測雲端遊戲延遲。'));
+            this.diagnostics=el('pre','v15-diagnostics');c.append(this.diagnostics,button('清除虛擬輸入／全停',()=>this.app.stopAll(),'danger'));return page;
+        }
+        syncQuickbar() {
+            if(!this.quickbar)return;this.quickbar.hidden=!this.p.showQuickbar;this.quickItems.hidden=this.p.quickbarCollapsed;this.quickToggle.textContent=this.p.quickbarCollapsed?'巨集 ▸':'巨集 ▾';this.quickToggle.setAttribute('aria-expanded',String(!this.p.quickbarCollapsed));
+            this.quickButtons.forEach((b,i)=>{const m=this.p.macros[i+1];b.textContent=`${i+1} ${m.name||'未命名'}`;b.title=m.name||`巨集 ${i+1}`;b.disabled=this.app.macro.recording||this.app.layout.editing||!m.events.length;b.classList.toggle('on',this.app.macro.playing&&this.app.macro.slot===i+1);});
+        }
+        tick(now) {
+            if(now-this.lastTick<100)return;this.lastTick=now;this.syncQuickbar();if(this.restoreButton)this.restoreButton.disabled=this.busy()||this.app.layout.editing;
+            if(this.app.shadow.activeElement!==this.layoutName)this.layoutName.value=this.p.layoutNames[this.p.layoutSlot];
+            if(this.panel.tab!=='diagnostics'||this.panel.collapsed)return;
+            const a=this.app,raw=a.rawSnapshot(),out=a.input.snapshot(),real=a.physical.state;
+            const describe=(label,s)=>`${label}\n按鍵：${s.buttons.map((v,i)=>v>0?`${LABELS[i]}=${v.toFixed(2)}`:'').filter(Boolean).join(' ')||'全部放開'}\n軸：${s.axes.map(v=>v.toFixed(3)).join(' / ')}`;
+            const keys=[...a.input.sources].map(([key,s])=>`${key}（優先 ${s.priority}）`).join('\n')||'無';
+            const physicalOut=this.p.physicalMapping?a.pipeline.process(real):real;
+            this.diagnostics.textContent=`${describe('RAW 虛擬原始',raw)}\n\n${describe('OUT 虛擬最終',out)}\n\n實體：${a.physical.connected?a.physical.id:'未連接'}\n${describe('實體原始',real)}\n${describe('實體送出',physicalOut)}\n\n作用中來源\n${keys}\n\n巨集：${a.macro.recording?'錄製中':a.macro.playing?'播放中':'停止'}\n虛擬槽位：${a.virtual.slot}\n目前來源按鍵由最大值合併；軸依優先順序仲裁。`;
+        }
+    }
+
     class App {
         constructor() {
             this.clock=()=>performance.now();this.abort=new AbortController();this.signal=this.abort.signal;this.destroyed=false;this.override=false;
@@ -725,21 +1062,29 @@
             this.input=new InputManager(this.clock);this.virtual=new VirtualGamepad(this.input,navigator,window);this.physical=new PhysicalGamepadMonitor(this.virtual);
             this.auto=new ButtonAutomation(this.input,this.config,this.clock);this.macro=new MacroEngine(this.input,this.config,this.clock);
             this.layout=new LayoutManager(this.config);this.pointers=new PointerManager(window,this.signal);this.racing=new RacingController(this);
+            this.pipeline=new InputPipeline(this.config);this.virtual.pipeline=this.pipeline;
+            this.rawSnapshot=this.input.snapshot.bind(this.input);this.input.snapshot=(filter)=>this.pipeline.process(this.rawSnapshot(filter));
+            this.input.recordingState=()=>this.rawSnapshot(key=>key!=='macro'&&key!=='afk');
+            const rawSet=this.input.set.bind(this.input),rawClear=this.input.clear.bind(this.input);
+            this.input.set=(key,...args)=>{if(this.shortcuts?.blocked.has(key))return;rawSet(key,...args);};
+            this.input.clear=key=>{this.shortcuts?.blocked.delete(key);rawClear(key);};
         }
         start() {
             this.host=el('div');this.host.id='bxg-v14-root';this.host.style.cssText='position:fixed;inset:0;pointer-events:none;z-index:2147483000;';
             this.shadow=this.host.attachShadow({mode:'open'});const style=el('style');style.textContent=CSS;this.shadow.append(style);document.documentElement.append(this.host);
             for(const type of ['click','dblclick','contextmenu'])this.shadow.addEventListener(type,e=>e.stopPropagation(),{signal:this.signal});
             this.panel=new ControlPanel(this);this.viewer=new ViewerHUD(this);this.racingView=new RacingRenderer(this);
+            this.shortcuts=new ShortcutManager(this);this.advanced=new AdvancedTools(this);
             try {this.virtual.install();} catch(e) {this.notice('無法掛接虛擬手把。請停用其他手把腳本後重新整理。');throw e;}
             this.bindEvents();this.loop();
             if(this.warnings.length)this.notice(this.warnings.join(' '));
         }
         bindEvents() {
-            window.addEventListener('keydown',e=>{if(e.code==='F2'&&!e.repeat){e.preventDefault();this.shortcut();}},{signal:this.signal});
+            window.addEventListener('keydown',e=>{if(e.code==='F2'&&!e.repeat&&!e.composedPath().some(n=>n?.matches?.('input,select,textarea,[contenteditable=true]'))){e.preventDefault();this.shortcut();}},{signal:this.signal});
             window.addEventListener('blur',()=>this.suspend(),{signal:this.signal});
             document.addEventListener('visibilitychange',()=>{if(document.hidden)this.suspend();},{signal:this.signal});
             window.addEventListener('pagehide',()=>this.suspend(),{signal:this.signal});
+            window.addEventListener('offline',()=>{this.suspend();this.notice('網路已離線，已釋放所有虛擬輸入。');},{signal:this.signal});
             window.addEventListener('resize',()=>{this.pointers.cancelAll();this.panel.refresh();this.viewer.resize();this.racingView.resize();},{signal:this.signal});
             document.addEventListener('pointerdown',e=>{
                 if(this.popupNode&&!e.composedPath().includes(this.popupNode))this.closePopup();
@@ -765,8 +1110,16 @@
             this.lastRaceContact=-Infinity;this.panelPointers.clear();this.panelWakeUntil=-Infinity;
             if(this.panel)this.updatePanelFade(this.clock());
             this.panel?.refreshStatus();
+            this.shortcuts?.blocked.clear();this.shortcuts?.holdSince.clear();
         }
         suspend() {this.stopAll();this.override=false;this.closePopup();this.updateVisibility();}
+        changeModeAfterRestore() {
+            const p=this.config.prefs;
+            this.panel.root.style.left=p.gameMode==='racing'?'15px':p.panelPos?.x||'15px';
+            this.panel.root.style.top=p.gameMode==='racing'?'15px':p.panelPos?.y||`${Math.max(15,window.innerHeight-280*p.uiScale)}px`;
+            this.viewer.root.style.left=p.viewerPos.x;this.viewer.root.style.top=p.viewerPos.y;
+            this.override=false;this.panel.refresh();this.viewer.resize();this.racingView.resize();this.updateVisibility();
+        }
         shortcut() {
             if(this.auto.modes.size){this.auto.stopModes();this.panel.refreshStatus();}
             else {this.pointers.cancelAll();this.panel.collapsed=!this.panel.collapsed;this.panel.refresh();}
@@ -779,7 +1132,7 @@
             else {this.panel.root.style.left=this.config.prefs.panelPos?.x||'15px';this.panel.root.style.top=this.config.prefs.panelPos?.y||`${Math.max(15,window.innerHeight-280)}px`;}
             this.config.save();this.panel.refresh();this.updateVisibility();
         }
-        playMacro(loop) {this.stopAll();this.macro.play(loop);this.panel.refresh();}
+        playMacro(loop,slot=this.macro.slot) {if(this.macro.recording){this.notice('請先停止錄製，再播放巨集。');return;}this.stopAll();this.macro.slot=slot;if(!this.macro.play(loop))this.notice(`槽位 ${slot} 沒有可播放的動作。`);this.panel.refresh();}
         clampElement(node) {
             if(!node||node.hidden)return;const rect=node.getBoundingClientRect();
             // CSS left/top 是視窗座標，不需除以 scale。
@@ -826,7 +1179,8 @@
             const shouldOverride=this.physical.connected&&now-this.physical.lastActivity<2500&&now>=this.manualUntil&&!this.layout.editing&&!this.pointers.busy;
             if(shouldOverride!==this.override){this.override=shouldOverride;if(!shouldOverride)this.panel.refresh();}
             this.auto.tick(now);this.macro.tick(now);this.racing.tick(now);
-            const virtualState=this.input.snapshot();
+            this.shortcuts.tick(now);this.advanced.tick(now);
+            const virtualState=this.rawSnapshot();
             const combo=(virtualState.buttons[10]>0.05&&virtualState.buttons[11]>0.05)||(this.physical.state.buttons[10]>0.05&&this.physical.state.buttons[11]>0.05);
             if(combo){if(this.comboSince===null)this.comboSince=now;if(!this.comboFired&&now-this.comboSince>=1500){this.comboFired=true;this.shortcut();}}
             else {this.comboSince=null;this.comboFired=false;}
@@ -847,10 +1201,11 @@
 
     // 測試可載入純邏輯類別，不啟動 DOM，也不改寫真實 navigator。
     if(typeof module==='object'&&module.exports) {
-        module.exports={ConfigStore,InputManager,VirtualGamepad,PhysicalGamepadMonitor,ButtonAutomation,MacroEngine,MacroBackup,LayoutManager,PointerManager,RacingController,App};return;
+        module.exports={ConfigStore,InputManager,VirtualGamepad,PhysicalGamepadMonitor,ButtonAutomation,MacroEngine,MacroBackup,MacroTimeline,ConfigurationBackup,InputPipeline,LayoutManager,PointerManager,RacingController,App};return;
     }
     if(window.top!==window.self)return;
     const boot=()=>{window.__BXG_V14__?.destroy?.();const app=new App();window.__BXG_V14__=app;
         try{app.start();}catch(e){console.error('[xCloud v14] 啟動失敗',e);app.destroy();alert('xCloud v14 啟動失敗，請查看 Console 並確認舊版已停用。');}};
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
+
