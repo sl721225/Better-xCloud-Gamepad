@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Better xCloud Gamepad v14 (模組重建版)
+// @name         CloudPad Studio
 // @namespace    http://tampermonkey.net/
-// @version      15.1.3
-// @updateURL    https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
-// @downloadURL  https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
+// @version      15.2.0
+// @updateURL    https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/CloudPad-Studio.user.js
+// @downloadURL  https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/CloudPad-Studio.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
 // @author       You
 // @match        *://*.xbox.com/*
@@ -13,7 +13,7 @@
 // ==/UserScript==
 
 /*
- * v15.1.3 — 觸控功能鍵獨立置頂置中、操作時面板自動淡化。
+ * v15.2.0 — CloudPad Studio 品牌更新；保留既有設定與備份相容性。
  * 沿用 v14 的名稱、namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -24,7 +24,8 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.1.3';
+    const VERSION = '15.2.0';
+    const APP_NAME = 'CloudPad Studio';
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(Number(v)) ? Number(v) : 0));
     const clone = value => JSON.parse(JSON.stringify(value));
     const slots = factory => Object.fromEntries(Array.from({length: 6}, (_, i) => [i + 1, factory()]));
@@ -288,7 +289,7 @@
         static MAX_BYTES=16*1024*1024;
         static MAX_EVENTS=200000;
         static validate(doc) {
-            if(!doc||doc.format!=='better-xcloud-macros'||doc.version!==1)throw Error('不是支援的巨集備份，請選擇本程式匯出的 JSON（格式版本 1）。');
+            if(!doc||!['cloudpad-studio-macros','better-xcloud-macros'].includes(doc.format)||doc.version!==1)throw Error('不是支援的巨集備份，請選擇本程式匯出的 JSON（格式版本 1）。');
             if(!Array.isArray(doc.macros)||![1,6].includes(doc.macros.length))throw Error('備份必須包含單一槽位或完整六組。');
             const seen=new Set();let total=0;
             const macros=doc.macros.map(m=>{
@@ -316,7 +317,7 @@
         }
         static encode(config,slot=null) {
             const ids=slot===null?[1,2,3,4,5,6]:[slot];
-            const doc={format:'better-xcloud-macros',version:1,appVersion:VERSION,exportedAt:new Date().toISOString(),
+            const doc={format:'cloudpad-studio-macros',version:1,appVersion:VERSION,exportedAt:new Date().toISOString(),
                 macros:ids.map(s=>({slot:s,name:config.prefs.macros[s].name||'',duration:config.prefs.macros[s].duration,events:clone(config.prefs.macros[s].events)}))};
             this.validate(doc);const text=JSON.stringify(doc,null,2);
             if(new TextEncoder().encode(text).length>this.MAX_BYTES)throw Error('備份超過 16 MB，請分槽匯出。');
@@ -372,9 +373,9 @@
     class ConfigurationBackup {
         static groups=['macros','layouts','settings'];
         static settingKeys=Object.keys(DEFAULTS()).filter(k=>!['macros','layouts','touchLayouts','racingLayouts','layoutNames'].includes(k));
-        static encode(config) {const doc={format:'better-xcloud-config',version:1,appVersion:VERSION,exportedAt:new Date().toISOString(),settings:clone(config.prefs)};this.validate(doc);return JSON.stringify(doc,null,2);}
+        static encode(config) {const doc={format:'cloudpad-studio-config',version:1,appVersion:VERSION,exportedAt:new Date().toISOString(),settings:clone(config.prefs)};this.validate(doc);return JSON.stringify(doc,null,2);}
         static validate(doc) {
-            if(!doc||doc.format!=='better-xcloud-config'||doc.version!==1||!doc.settings||Array.isArray(doc.settings))throw Error('不是支援的完整備份（格式版本 1）。');
+            if(!doc||!['cloudpad-studio-config','better-xcloud-config'].includes(doc.format)||doc.version!==1||!doc.settings||Array.isArray(doc.settings))throw Error('不是支援的完整備份（格式版本 1）。');
             if(new TextEncoder().encode(JSON.stringify(doc)).length>MacroBackup.MAX_BYTES)throw Error('備份超過 16 MB。');
             const d=clone(doc.settings),defaults=DEFAULTS();
             // v15.0.0～15.0.2 完整備份沒有來源設定，仍可還原為虛擬錄製。
@@ -685,7 +686,7 @@
             this.app=app;this.config=app.config;this.p=this.config.prefs;this.root=el('section','panel');
             this.root.setAttribute('aria-label','虛擬手把控制面板');this.collapsed=false;this.tab=null;this.dirty=true;
             this.buttons=[];this.sticks=[];this.tapStates=new Map();
-            this.header=el('div','header');this.drag=el('span','brand','⠿');this.drag.title='拖曳面板';this.drag.setAttribute('aria-label','拖曳面板');
+            this.header=el('div','header');this.drag=el('span','brand','⠿');this.drag.title=`${APP_NAME} · v${VERSION} · 拖曳面板`;this.drag.setAttribute('aria-label','拖曳面板');
             this.collapseBtn=button('收合',()=>{app.pointers.cancelAll();this.collapsed=!this.collapsed;this.refresh();});
             this.modeBtn=button('',()=>app.changeMode());this.toolBtn=button('設定 ⚙',()=>this.openTab(this.tab==='settings'&&!this.collapsed?null:'settings'));
             this.macroQuick=button('巨集',()=>this.openTab(this.tab==='macro'&&!this.collapsed?null:'macro'));
@@ -791,7 +792,7 @@
             try {
                 if(this.app.macro.recording)throw Error('請先停止錄製，再匯出完整巨集。');
                 const json=MacroBackup.encode(this.config,slot),url=URL.createObjectURL(new Blob([json],{type:'application/json'}));
-                const a=el('a');a.href=url;a.download=`xcloud-macros-${slot===null?'all':`slot-${slot}`}-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+                const a=el('a');a.href=url;a.download=`cloudpad-studio-macros-${slot===null?'all':`slot-${slot}`}-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
                 this.app.shadow.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
                 this.backupMessage.textContent='已產生 JSON 備份，請確認瀏覽器下載。';
             }catch(e){this.backupMessage.textContent=e.message;}
@@ -984,7 +985,7 @@
         constructor(app) {
             this.app=app;this.p=app.config.prefs;this.root=el('aside','viewer');this.root.setAttribute('aria-label','展示 HUD');
             this.root.style.left=this.p.viewerPos.x;this.root.style.top=this.p.viewerPos.y;this.keys=new Map();
-            const head=el('div','head');head.append(el('span','','INPUT / LIVE'));this.sourceLabel=el('span','','VIRTUAL');head.append(this.sourceLabel);
+            const head=el('div','head');head.append(el('span','',APP_NAME));this.sourceLabel=el('span','','VIRTUAL');head.append(this.sourceLabel);
             const meters=el('div','triggers');this.meters=[];
             for(const [id,label] of [[6,'LT'],[7,'RT']]){const meter=el('div',id===7?'meter mirror':'meter');const labels=el('div','meterlabel');
                 const percent=el('span','','0%');labels.append(el('span','',label),percent);const track=el('div','track'),fill=el('div','fill');track.append(fill);meter.append(labels,track);meters.append(meter);this.meters.push({id,fill,percent});}
@@ -1149,7 +1150,7 @@
             this.layoutTarget=this.select(c,'目的佈局',Array.from({length:6},(_,i)=>[i+1,`佈局 ${i+1}`]),1,()=>{});
             const row=el('div','row');row.append(button('複製到目的',()=>this.layoutOperation('copy')),button('交換兩組',()=>this.layoutOperation('swap')));c.append(row);
             this.layoutItem=this.select(c,'還原單一元件',[...this.app.layout.items.keys()].map(id=>[id,id.startsWith('stick_')?(id==='stick_0'?'LS':'RS'):LABELS[Number(id)]]),'0',()=>{});
-            c.append(button('還原此元件',()=>this.attempt(this.layoutMessage,()=>{this.requireIdle();if(!confirm('還原目前模式的此元件位置？'))return false;this.saveChange(()=>delete this.app.layout.offsets()[this.layoutItem.value]);this.app.layout.apply();})),button('匯出六組佈局',()=>this.download('xcloud-layouts.json',JSON.stringify(this.layoutDocument(),null,2),this.layoutMessage)),button('匯入佈局',()=>this.chooseFile('layouts',this.layoutMessage)));
+            c.append(button('還原此元件',()=>this.attempt(this.layoutMessage,()=>{this.requireIdle();if(!confirm('還原目前模式的此元件位置？'))return false;this.saveChange(()=>delete this.app.layout.offsets()[this.layoutItem.value]);this.app.layout.apply();})),button('匯出六組佈局',()=>this.download('cloudpad-studio-layouts.json',JSON.stringify(this.layoutDocument(),null,2),this.layoutMessage)),button('匯入佈局',()=>this.chooseFile('layouts',this.layoutMessage)));
             return c;
         }
         layoutOperation(kind) {
@@ -1168,9 +1169,9 @@
             c.append(el('div','hint','只影響觸控佈局。空白處仍可操作遊戲頁面；預設排列會保留觸控範圍間距。佈局編輯時顯示按鍵實際範圍，並暫時恢復清楚顯示。自訂拖曳時請避免重疊。窄畫面改為上下排列；大小超過可用空間時會自動縮放。'));
             return c;
         }
-        layoutDocument() {return {format:'better-xcloud-layouts',version:2,layouts:clone(this.p.layouts),racingLayouts:clone(this.p.racingLayouts),touchLayouts:clone(this.p.touchLayouts),layoutNames:clone(this.p.layoutNames)};}
+        layoutDocument() {return {format:'cloudpad-studio-layouts',version:2,layouts:clone(this.p.layouts),racingLayouts:clone(this.p.racingLayouts),touchLayouts:clone(this.p.touchLayouts),layoutNames:clone(this.p.layoutNames)};}
         validateLayouts(doc) {
-            if(doc?.format!=='better-xcloud-layouts'||![1,2].includes(doc.version))throw Error('不是支援的佈局備份。');
+            if(!['cloudpad-studio-layouts','better-xcloud-layouts'].includes(doc?.format)||![1,2].includes(doc.version))throw Error('不是支援的佈局備份。');
             if(doc.version===2&&!doc.touchLayouts)throw Error('觸控佈局資料不完整。');
             const merged=clone(this.p);merged.layouts=doc.layouts;merged.layoutNames=doc.layoutNames;
             if(doc.touchLayouts)merged.touchLayouts=doc.touchLayouts;
@@ -1179,10 +1180,10 @@
         }
         backupPage() {
             const page=el('div'),c=this.card('完整設定備份',page);this.backupMessage=this.message(c);const row=el('div','row');
-            row.append(button('匯出完整備份',()=>{try{this.requireIdle();this.download(`xcloud-config-${VERSION}.json`,ConfigurationBackup.encode(this.app.config),this.backupMessage);}catch(e){this.backupMessage.textContent=e.message;}}),button('匯入完整備份',()=>this.chooseFile('config',this.backupMessage)));
+            row.append(button('匯出完整備份',()=>{try{this.requireIdle();this.download(`cloudpad-studio-config-${VERSION}.json`,ConfigurationBackup.encode(this.app.config),this.backupMessage);}catch(e){this.backupMessage.textContent=e.message;}}),button('匯入完整備份',()=>this.chooseFile('config',this.backupMessage)));
             c.append(row,el('div','hint','備份包含六組巨集、六組佈局、名稱、曲線、映射與介面設定。匯入只保存設定，不會自動啟動巨集／連發。'));
             this.backupPreview=el('div','v15-card');this.backupPreview.hidden=true;c.append(this.backupPreview);
-            const update=this.card('版本與更新',page);update.append(el('div','meta',`目前版本 ${VERSION}`));this.updateMessage=this.message(update);
+            const update=this.card('版本與更新',page);update.append(el('div','meta',`${APP_NAME} · v${VERSION}`));this.updateMessage=this.message(update);
             this.updateButton=button('檢查正式版更新',()=>this.checkUpdate());const releases=el('a','','開啟正式版本下載頁');releases.href='https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest';releases.target='_blank';releases.rel='noopener noreferrer';releases.style.color='var(--green)';update.append(this.updateButton,releases,el('div','hint','只追蹤正式 Release，不使用 main 測試版本。自動更新依腳本管理器設定執行；遊戲中不強制重載。'));
             return page;
         }
@@ -1254,7 +1255,7 @@
             this.manualUntil=-Infinity;this.comboSince=null;this.comboFired=false;this.popupNode=null;
             this.lastRaceContact=-Infinity;this.panelWakeUntil=-Infinity;this.panelPointers=new Set();
             let storage;try{storage=window.localStorage;}catch{storage={getItem:()=>null,setItem:()=>{throw Error('Storage unavailable');}};}
-            this.warnings=[];this.config=new ConfigStore(storage,(message,e)=>{console.warn('[xCloud v14]',message,e||'');if(!this.warnings.includes(message)){this.warnings.push(message);this.notice(message);}});
+            this.warnings=[];this.config=new ConfigStore(storage,(message,e)=>{console.warn('[CloudPad Studio]',message,e||'');if(!this.warnings.includes(message)){this.warnings.push(message);this.notice(message);}});
             this.input=new InputManager(this.clock);this.virtual=new VirtualGamepad(this.input,navigator,window);this.physical=new PhysicalGamepadMonitor(this.virtual);
             this.auto=new ButtonAutomation(this.input,this.config,this.clock);this.macro=new MacroEngine(this.input,this.config,this.clock);
             this.layout=new LayoutManager(this.config);this.pointers=new PointerManager(window,this.signal);this.racing=new RacingController(this);
@@ -1428,6 +1429,7 @@
         destroy() {
             this.destroyed=true;cancelAnimationFrame(this.raf);this.stopAll();this.abort.abort();this.virtual.destroy();this.host?.remove();
             if(window.__BXG_V14__===this)delete window.__BXG_V14__;
+            if(window.__CLOUDPAD_STUDIO__===this)delete window.__CLOUDPAD_STUDIO__;
         }
     }
 
@@ -1436,8 +1438,8 @@
         module.exports={ConfigStore,InputManager,VirtualGamepad,PhysicalGamepadMonitor,ButtonAutomation,MacroEngine,MacroBackup,MacroTimeline,ConfigurationBackup,InputPipeline,LayoutManager,PointerManager,RacingController,App};return;
     }
     if(window.top!==window.self)return;
-    const boot=()=>{window.__BXG_V14__?.destroy?.();const app=new App();window.__BXG_V14__=app;
-        try{app.start();}catch(e){console.error('[xCloud v14] 啟動失敗',e);app.destroy();alert('xCloud v14 啟動失敗，請查看 Console 並確認舊版已停用。');}};
+    const boot=()=>{const previous=window.__CLOUDPAD_STUDIO__||window.__BXG_V14__;previous?.destroy?.();const app=new App();window.__CLOUDPAD_STUDIO__=app;window.__BXG_V14__=app;
+        try{app.start();}catch(e){console.error('[CloudPad Studio] 啟動失敗',e);app.destroy();alert('CloudPad Studio 啟動失敗，請查看 Console 並確認舊版已停用。');}};
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
 
