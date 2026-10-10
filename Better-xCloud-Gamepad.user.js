@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Better xCloud Gamepad v14 (模組重建版)
 // @namespace    http://tampermonkey.net/
-// @version      15.1.1
+// @version      15.1.2
 // @updateURL    https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
 // @downloadURL  https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
@@ -13,7 +13,7 @@
 // ==/UserScript==
 
 /*
- * v15.1.1 — 頂部操作依模式、功能、安全分組，窄版固定雙列。
+ * v15.1.2 — 賽車按鍵固定貼邊、獨立佈局，移除左右分離選項。
  * 沿用 v14 的名稱、namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -24,7 +24,7 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.1.1';
+    const VERSION = '15.1.2';
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(Number(v)) ? Number(v) : 0));
     const clone = value => JSON.parse(JSON.stringify(value));
     const slots = factory => Object.fromEntries(Array.from({length: 6}, (_, i) => [i + 1, factory()]));
@@ -41,7 +41,7 @@
         keyboardMacros:false,comboMacros:false,showQuickbar:true,quickbarCollapsed:true,
         macroKeys:['F3','F4','F5','F6','F7','F8'],macroCombos:[[4,0],[4,1],[4,2],[4,3],[5,0],[5,1]],
         emergencyKey:'F9',emergencyEnabled:true,holdTimeout:0,playbackLimit:0,
-        controlStyle:'panel',touchPanelPos:{x:'15px',y:'15px'},touchLayouts:slots(()=>({})),
+        controlStyle:'panel',touchPanelPos:{x:'15px',y:'15px'},touchLayouts:slots(()=>({})),racingLayouts:slots(()=>({})),
         touchButtonSize:1,touchStickSize:1,touchHitPadding:4,touchOpacityLeft:.75,touchOpacityRight:.75,touchOpacityUtility:.7});
 
     class ConfigStore {
@@ -89,6 +89,8 @@
                     const pos = layout?.[id];
                     if (pos && Number.isFinite(Number(pos.x)) && Number.isFinite(Number(pos.y)))
                         p.layouts[s][id]={x:clamp(pos.x,-10000,10000),y:clamp(pos.y,-10000,10000)};
+                    const race=d.racingLayouts?.[s]?.[id];
+                    if(race&&Number.isFinite(Number(race.x))&&Number.isFinite(Number(race.y)))p.racingLayouts[s][id]={x:clamp(race.x,-10000,10000),y:clamp(race.y,-10000,10000)};
                     const touch=d.touchLayouts?.[s]?.[id];
                     if(touch&&Number.isFinite(Number(touch.x))&&Number.isFinite(Number(touch.y)))p.touchLayouts[s][id]={x:clamp(touch.x,-10000,10000),y:clamp(touch.y,-10000,10000)};
                 }
@@ -369,7 +371,7 @@
 
     class ConfigurationBackup {
         static groups=['macros','layouts','settings'];
-        static settingKeys=Object.keys(DEFAULTS()).filter(k=>!['macros','layouts','touchLayouts','layoutNames'].includes(k));
+        static settingKeys=Object.keys(DEFAULTS()).filter(k=>!['macros','layouts','touchLayouts','racingLayouts','layoutNames'].includes(k));
         static encode(config) {const doc={format:'better-xcloud-config',version:1,appVersion:VERSION,exportedAt:new Date().toISOString(),settings:clone(config.prefs)};this.validate(doc);return JSON.stringify(doc,null,2);}
         static validate(doc) {
             if(!doc||doc.format!=='better-xcloud-config'||doc.version!==1||!doc.settings||Array.isArray(doc.settings))throw Error('不是支援的完整備份（格式版本 1）。');
@@ -377,7 +379,7 @@
             const d=clone(doc.settings),defaults=DEFAULTS();
             // v15.0.0～15.0.2 完整備份沒有來源設定，仍可還原為虛擬錄製。
             if(!('macroRecordSource' in d))d.macroRecordSource='virtual';
-            for(const key of ['controlStyle','touchPanelPos','touchLayouts','touchButtonSize','touchStickSize','touchHitPadding','touchOpacityLeft','touchOpacityRight','touchOpacityUtility'])if(!(key in d))d[key]=clone(defaults[key]);
+            for(const key of ['racingLayouts','controlStyle','touchPanelPos','touchLayouts','touchButtonSize','touchStickSize','touchHitPadding','touchOpacityLeft','touchOpacityRight','touchOpacityUtility'])if(!(key in d))d[key]=clone(defaults[key]);
             for(const key of Object.keys(defaults))if(!(key in d))throw Error(`備份缺少 ${key}。`);
             MacroBackup.validate({format:'better-xcloud-macros',version:1,macros:[1,2,3,4,5,6].map(slot=>({slot,...d.macros?.[slot]}))});
             for(let s=1;s<=6;s++){
@@ -385,6 +387,8 @@
                 for(const [id,v] of Object.entries(d.layouts[s]))if(![...Object.keys(GROUPS),'16'].includes(id)||!v||!Number.isFinite(v.x)||!Number.isFinite(v.y)||Math.abs(v.x)>10000||Math.abs(v.y)>10000)throw Error(`佈局 ${s} 有無效位移。`);
                 if(!d.touchLayouts?.[s]||Array.isArray(d.touchLayouts[s])||typeof d.touchLayouts[s]!=='object')throw Error('觸控佈局資料不完整。');
                 for(const [id,v] of Object.entries(d.touchLayouts[s]))if(![...Object.keys(GROUPS),'16'].includes(id)||!v||!Number.isFinite(v.x)||!Number.isFinite(v.y)||Math.abs(v.x)>10000||Math.abs(v.y)>10000)throw Error(`觸控佈局 ${s} 有無效位移。`);
+                if(!d.racingLayouts?.[s]||Array.isArray(d.racingLayouts[s])||typeof d.racingLayouts[s]!=='object')throw Error('賽車佈局資料不完整。');
+                for(const [id,v] of Object.entries(d.racingLayouts[s]))if(![...Object.keys(GROUPS),'16'].includes(id)||!v||!Number.isFinite(v.x)||!Number.isFinite(v.y)||Math.abs(v.x)>10000||Math.abs(v.y)>10000)throw Error(`賽車佈局 ${s} 有無效位移。`);
             }
             const checked=new ConfigStore({getItem:()=>null,setItem:()=>{}},()=>{}).sanitize(d);
             // 備份用嚴格驗證：不容許無效數值被靜默修正。
@@ -399,7 +403,7 @@
             if(!groups.length||groups.some(g=>!this.groups.includes(g)))throw Error('請選擇還原項目。');
             const valid=this.validate({format:'better-xcloud-config',version:1,settings:data}),old=clone(config.prefs),next=clone(old);
             if(groups.includes('macros'))next.macros=valid.macros;
-            if(groups.includes('layouts')){next.layouts=valid.layouts;next.touchLayouts=valid.touchLayouts;next.layoutNames=valid.layoutNames;}
+            if(groups.includes('layouts')){next.layouts=valid.layouts;next.touchLayouts=valid.touchLayouts;next.racingLayouts=valid.racingLayouts;next.layoutNames=valid.layoutNames;}
             if(groups.includes('settings'))for(const key of this.settingKeys)next[key]=valid[key];
             Object.assign(config.prefs,next);if(!config.save()){Object.assign(config.prefs,old);throw Error('儲存失敗，已還原原資料。');}
         }
@@ -483,7 +487,7 @@
     class LayoutManager {
         constructor(config) {this.config=config;this.items=new Map();this.editing=false;this.group=true;this.snap=true;this.dragging=false;}
         register(id,el) {this.items.set(String(id),el);this.apply();}
-        collection() {const p=this.config.prefs;return p.controlStyle==='touch'&&p.gameMode==='standard'?p.touchLayouts:p.layouts;}
+        collection() {const p=this.config.prefs;return p.gameMode==='racing'?p.racingLayouts:p.controlStyle==='touch'?p.touchLayouts:p.layouts;}
         offsets() {return this.collection()[this.config.prefs.layoutSlot];}
         apply() {for(const [id,el] of this.items) {const p=this.offsets()[id]||{x:0,y:0};el.style.transform=`translate(${p.x}px,${p.y}px)`;}}
         drag(id,e,scale) {
@@ -567,7 +571,7 @@
     .stickwrap.left{left:-8px}.stickwrap.right{left:8px}.stickwrap.right>.padkey{left:auto;right:-4px}
     .editing .padkey,.editing .stick{outline:1px dashed #ffda75;cursor:move}.editing .controls{background-image:radial-gradient(#ffe19944 1px,transparent 1px);background-size:10px 10px}
     .compact .playrow{gap:18px}.compact .zone{gap:12px}.compact .stick{width:50px;height:50px}.compact .knob{width:24px;height:24px}.compact .cross{grid-template-columns:repeat(3,24px);grid-template-rows:repeat(3,24px);gap:2px}.compact .cross .padkey{width:24px;height:24px;font-size:9px}
-    .split .playrow{justify-content:space-between}.racing-hint{margin-top:5px;color:var(--muted);font-size:10px}
+    .racing-hint{margin-top:5px;color:var(--muted);font-size:10px}
     .racearea{position:fixed;left:0;bottom:0;width:100vw;height:62vh;display:flex;pointer-events:none;z-index:1}.racezone{width:50%;height:100%;pointer-events:auto;touch-action:none;position:relative}.racezone>span{position:absolute;bottom:12px;left:20px;font-size:10px;color:#ffffff55;pointer-events:none}
     canvas{position:fixed;inset:0;pointer-events:none;z-index:2}
     .viewer{width:300px;padding:12px;z-index:4;cursor:grab;touch-action:none}.viewer .head{display:flex;justify-content:space-between;font-size:9px;color:var(--muted);letter-spacing:1px;margin-bottom:10px}
@@ -611,6 +615,10 @@
                 .touchdock .touch-top .padkey{width:calc(var(--button) + 8px)!important;height:36px!important;font-size:12px}
                 .touch-utility{margin-top:7px}.touch-utility>.cluster{gap:8px;justify-content:center}
                 .touch-utility .padkey{height:30px!important;min-width:34px;font-size:10px}
+                .race-dock .touch-region{top:var(--race-top);bottom:auto;transform-origin:top left}.race-dock .touch-right{transform-origin:top right}
+                .race-dock .touch-left>.stickwrap{bottom:var(--race-stick-y)}.race-dock .touch-left>.cross{bottom:0;left:0;right:auto}
+                .race-dock .touch-right>.cross{left:auto;right:0}
+                .race-dock .touch-top{position:fixed!important;top:calc(14px + env(safe-area-inset-top,0px));bottom:auto!important}
                 .touchdock.editing .padkey::before{outline:1px dashed #ffdb75;background:#ffdb7510}
                 .touchdock.editing .stick{outline:1px dashed #ffdb75;cursor:move}
                 .touchdock.editing .touch-region{background-image:radial-gradient(#ffe19933 1px,transparent 1px);background-size:10px 10px}
@@ -625,7 +633,7 @@
             r.style.top=p.gameMode==='racing'?'15px':point?.y||(this.active?'15px':`${Math.max(15,window.innerHeight-280*p.uiScale)}px`);
         }
         sync() {
-            const active=this.p.controlStyle==='touch'&&this.p.gameMode==='standard';
+            const racing=this.p.gameMode==='racing',active=racing||this.p.controlStyle==='touch',modeChanged=this.racing!==racing;this.racing=racing;
             if(active!==this.active){
                 this.app.pointers.cancelAll();this.active=active;
                 if(active){
@@ -634,7 +642,9 @@
                 }else for(const [node,anchor] of this.anchors){anchor.after(node);node.classList.remove('touch-top');}
                 this.positionPanel();this.app.layout.apply();
             }
-            this.utility.hidden=!active||this.panel.collapsed;this.root.classList.toggle('editing',this.app.layout.editing);
+            if(active){const n=this.nodes;if(racing){this.root.append(n.leftTop,n.rightTop);n.leftTop.style.left='14px';n.rightTop.style.right='14px';}else{this.left.prepend(n.leftTop);this.right.prepend(n.rightTop);n.leftTop.style.left='';n.rightTop.style.right='';}}
+            this.root.classList.toggle('race-dock',racing);this.utility.hidden=!active||this.panel.collapsed;this.root.classList.toggle('editing',this.app.layout.editing);
+            if(modeChanged){this.positionPanel();this.app.layout.apply();this.root.style.opacity='1';}
             if(active){
                 const p=this.p,button=36*p.touchButtonSize,hit=p.touchHitPadding,cell=button+hit*2+4,cross=cell*3+8,stick=100*p.touchStickSize;
                 const stacked=window.innerWidth<760,topY=stacked?stick+cross+24:stick+16,crossY=stacked?stick+12:42;
@@ -647,6 +657,15 @@
                 this.left.style.transform=this.right.style.transform=`scale(${this.scale})`;
                 this.left.style.opacity=this.app.layout.editing?'1':String(p.touchOpacityLeft);this.right.style.opacity=this.app.layout.editing?'1':String(p.touchOpacityRight);
                 this.utility.style.opacity=this.app.layout.editing?'1':String(p.touchOpacityUtility);
+                if(racing){
+                    const raceWidth=Math.max(cross,stick,sideWidth),raceHeight=cross+stick+18;
+                    this.scale=Math.min(1,(window.innerWidth-44)/(2*raceWidth),(window.innerHeight*.48)/raceHeight);
+                    this.root.style.setProperty('--region-w',`${raceWidth}px`);this.root.style.setProperty('--region-h',`${raceHeight}px`);
+                    this.root.style.setProperty('--race-stick-y',`${cross+18}px`);this.root.style.setProperty('--cross-y',`${stick+18}px`);
+                    this.left.style.transform=this.right.style.transform=`scale(${this.scale})`;
+                    this.root.style.setProperty('--race-top',`${Math.max(76,window.innerHeight*.42-raceHeight*this.scale/2)}px`);
+                    this.renderedHeight=0;
+                }
             }
             this.updateVisibility();
         }
@@ -701,7 +720,7 @@
             this.selectSetting(page,'控制面板大小','uiScale',[.8,1,1.2,1.5].map(v=>[v,`${Math.round(v*100)}%`]));
             this.selectSetting(page,'控制面板背景','bgTrans',[[false,'半透明'],[true,'透明']]);
             this.selectSetting(page,'賽車操作時淡化','racingAutoFade',[[true,'開啟（25%）'],[false,'關閉']]);
-            this.selectSetting(page,'左右分離','splitMode',[[false,'合併'],[true,'分離']]);
+            // 舊 splitMode 欄位保留以讀取備份，介面與渲染已停用。
             this.selectSetting(page,'極簡展示 HUD','showViewer',[[false,'隱藏（實體操作時自動顯示）'],[true,'顯示']]);
             this.selectSetting(page,'展示 HUD 大小','viewerScale',[.6,.8,1,1.2].map(v=>[v,`${Math.round(v*100)}%`]),()=>this.app.viewer?.resize());
             const row=el('div','row');const key=el('select');key.setAttribute('aria-label','自動按鍵');
@@ -920,17 +939,18 @@
             this.helpBtn.classList.toggle('on',this.p.showHelp);this.helpBtn.setAttribute('aria-pressed',String(this.p.showHelp));this.helpBtn.title=this.p.showHelp?'隱藏操作說明':'顯示操作說明';
             this.macroQuick.classList.toggle('on',this.tab==='macro'&&!this.collapsed);this.macroQuick.setAttribute('aria-expanded',String(this.tab==='macro'&&!this.collapsed));
             this.toolBtn.classList.toggle('on',this.tab==='settings'&&!this.collapsed);this.toolBtn.setAttribute('aria-expanded',String(this.tab==='settings'&&!this.collapsed));
-            const racing=this.p.gameMode==='racing';this.root.classList.toggle('compact',racing);this.root.classList.toggle('split',this.p.splitMode&&!racing);
-            const touch=this.p.controlStyle==='touch'&&!racing;
+            const racing=this.p.gameMode==='racing';this.root.classList.toggle('compact',racing);
+            const touch=this.p.controlStyle==='touch'||racing;
             this.root.classList.toggle('touch-mode',touch);
             this.styleQuick.textContent=touch?'觸控':'面板';this.styleQuick.disabled=racing;this.styleQuick.setAttribute('aria-pressed',String(touch));
             for(const [style,b] of Object.entries(this.layoutStyleButtons)){b.disabled=racing;b.classList.toggle('on',this.p.controlStyle===style);b.setAttribute('aria-pressed',String(this.p.controlStyle===style));}
             this.root.classList.toggle('transparent',this.p.bgTrans);this.root.classList.toggle('editing',this.app.layout.editing);
-            const width=this.collapsed?350:touch&&!this.tab?400:this.p.splitMode&&!racing&&!touch?Math.max(550,(window.innerWidth-30)/this.p.uiScale):550;
+            const width=this.collapsed?350:touch&&!this.tab?400:550;
             this.effectiveScale=Math.min(this.p.uiScale,(window.innerWidth-16)/width);
             this.root.classList.toggle('compact-toolbar',width*this.effectiveScale<480);
             this.root.style.transform=`scale(${this.effectiveScale})`;
             this.root.style.width=`${width}px`;
+            if(racing){this.root.style.left=`${Math.max(8,(window.innerWidth-width*this.effectiveScale)/2)}px`;this.root.style.top=window.innerWidth<700?'66px':'15px';}
             this.modeBtn.textContent=racing?'賽車':'標準';this.collapseBtn.textContent=this.collapsed?'展開':'收合';
             this.controls.hidden=this.collapsed||touch;this.help.hidden=this.collapsed;this.raceHint.hidden=this.collapsed||!racing;
             this.tabs.hidden=this.tools.hidden=this.collapsed||!this.tab;
@@ -1125,7 +1145,7 @@
         }
         layoutOperation(kind) {
             this.attempt(this.layoutMessage,()=>{this.requireIdle();const from=this.p.layoutSlot,to=Number(this.layoutTarget.value);if(from===to)throw Error('請選擇不同目的佈局。');if(!confirm(`${kind==='copy'?'複製覆蓋':'交換'}佈局 ${from} 與 ${to}？`))return;
-                this.saveChange(()=>{const name=this.p.layoutNames[from];for(const collection of [this.p.layouts,this.p.touchLayouts]){const layout=clone(collection[from]);if(kind==='swap')collection[from]=clone(collection[to]);collection[to]=layout;}if(kind==='swap')this.p.layoutNames[from]=this.p.layoutNames[to];this.p.layoutNames[to]=name;});this.app.layout.apply();});
+                this.saveChange(()=>{const name=this.p.layoutNames[from];for(const collection of [this.p.layouts,this.p.touchLayouts,this.p.racingLayouts]){const layout=clone(collection[from]);if(kind==='swap')collection[from]=clone(collection[to]);collection[to]=layout;}if(kind==='swap')this.p.layoutNames[from]=this.p.layoutNames[to];this.p.layoutNames[to]=name;});this.app.layout.apply();});
         }
         touchSettingsPage() {
             const c=this.card('觸控尺寸與分區透明度'),message=this.message(c);
@@ -1139,13 +1159,14 @@
             c.append(el('div','hint','只影響觸控佈局。空白處仍可操作遊戲頁面；預設排列會保留觸控範圍間距。佈局編輯時顯示按鍵實際範圍，並暫時恢復清楚顯示。自訂拖曳時請避免重疊。窄畫面改為上下排列；大小超過可用空間時會自動縮放。'));
             return c;
         }
-        layoutDocument() {return {format:'better-xcloud-layouts',version:2,layouts:clone(this.p.layouts),touchLayouts:clone(this.p.touchLayouts),layoutNames:clone(this.p.layoutNames)};}
+        layoutDocument() {return {format:'better-xcloud-layouts',version:2,layouts:clone(this.p.layouts),racingLayouts:clone(this.p.racingLayouts),touchLayouts:clone(this.p.touchLayouts),layoutNames:clone(this.p.layoutNames)};}
         validateLayouts(doc) {
             if(doc?.format!=='better-xcloud-layouts'||![1,2].includes(doc.version))throw Error('不是支援的佈局備份。');
             if(doc.version===2&&!doc.touchLayouts)throw Error('觸控佈局資料不完整。');
             const merged=clone(this.p);merged.layouts=doc.layouts;merged.layoutNames=doc.layoutNames;
             if(doc.touchLayouts)merged.touchLayouts=doc.touchLayouts;
-            const valid=ConfigurationBackup.validate({format:'better-xcloud-config',version:1,settings:merged});return {layouts:valid.layouts,touchLayouts:valid.touchLayouts,layoutNames:valid.layoutNames};
+            if(doc.racingLayouts)merged.racingLayouts=doc.racingLayouts;
+            const valid=ConfigurationBackup.validate({format:'better-xcloud-config',version:1,settings:merged});return {layouts:valid.layouts,touchLayouts:valid.touchLayouts,racingLayouts:valid.racingLayouts,layoutNames:valid.layoutNames};
         }
         backupPage() {
             const page=el('div'),c=this.card('完整設定備份',page);this.backupMessage=this.message(c);const row=el('div','row');
@@ -1365,6 +1386,8 @@
             // 頂部面板一被觸碰就立即清楚，其餘淡入淡出則平滑過渡。
             styleValue(this.panel.root,'transition',awake?'none':'opacity 200ms ease');
             styleValue(this.panel.root,'opacity',dim?'0.25':'1');
+            if(this.touch?.active){styleValue(this.touch.root,'transition',awake?'none':'opacity 200ms ease');styleValue(this.touch.root,'opacity',dim?'0.25':'1');}
+            if(this.advanced?.quickbar){const race=this.config.prefs.gameMode==='racing';styleValue(this.advanced.quickbar,'top',race?'64px':'35%');styleValue(this.advanced.quickbar,'maxHeight',race?'80px':'65vh');}
         }
         loop() {
             if(this.destroyed)return;
