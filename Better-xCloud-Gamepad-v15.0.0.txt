@@ -257,7 +257,7 @@
             let elapsed=(now-this.playStart)*(this.speed||1);
             if(elapsed>=this.data.duration&&this.loop) {
                 this.playStart+=Math.floor(elapsed/this.data.duration)*this.data.duration/(this.speed||1);
-                elapsed=now-this.playStart;this.index=0;this.input.clear('macro');
+                elapsed=(now-this.playStart)*(this.speed||1);this.index=0;this.input.clear('macro');
             }
             while(this.index<this.data.events.length&&this.data.events[this.index].t<=elapsed) {
                 const e=this.data.events[this.index++]; this.input.set('macro',e.type,e.id,e.val,30);
