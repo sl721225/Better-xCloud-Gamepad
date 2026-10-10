@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Better xCloud Gamepad v14 (模組重建版)
 // @namespace    http://tampermonkey.net/
-// @version      15.0.2
+// @version      15.0.3
 // @updateURL    https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
 // @downloadURL  https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
@@ -13,7 +13,7 @@
 // ==/UserScript==
 
 /*
- * v15.0.2 — 隔離控制介面的右鍵滑鼠事件，統一右鍵與多擊的鎖定入口。
+ * v15.0.3 — 新增實體手把巨集錄製與來源切換，放大巨集操作圖示。
  * 沿用 v14 的名稱、namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -24,7 +24,7 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.0.2';
+    const VERSION = '15.0.3';
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(Number(v)) ? Number(v) : 0));
     const clone = value => JSON.parse(JSON.stringify(value));
     const slots = factory => Object.fromEntries(Array.from({length: 6}, (_, i) => [i + 1, factory()]));
@@ -37,7 +37,7 @@
         splitMode:false, uiScale:1, showViewer:false, viewerScale:0.8, viewerPos:{x:'20px',y:'20px'},
         panelPos:null, layoutSlot:1, layouts:slots(() => ({})), macros:slots(() => ({name:'',duration:0,events:[]})),
         layoutNames:slots(()=>''),axisTuning:[0,1].map(()=>({deadzone:0,sensitivity:1,max:1,curve:'linear',invertX:false,invertY:false})),
-        buttonMap:Array.from({length:17},(_,i)=>i),physicalMapping:false,macroSpeed:1,
+        buttonMap:Array.from({length:17},(_,i)=>i),physicalMapping:false,macroSpeed:1,macroRecordSource:'virtual',
         keyboardMacros:false,comboMacros:false,showQuickbar:true,quickbarCollapsed:true,
         macroKeys:['F3','F4','F5','F6','F7','F8'],macroCombos:[[4,0],[4,1],[4,2],[4,3],[5,0],[5,1]],
         emergencyKey:'F9',emergencyEnabled:true,holdTimeout:0,playbackLimit:0});
@@ -51,6 +51,7 @@
             const p = DEFAULTS(); const d = data && typeof data === 'object' ? data : {};
             ['bgTrans','comboTaps','splitMode','showViewer','racingAutoFade','showHelp','physicalMapping','keyboardMacros','comboMacros','showQuickbar','quickbarCollapsed','emergencyEnabled'].forEach(k => {if (typeof d[k] === 'boolean') p[k]=d[k];});
             p.macroSpeed=d.macroSpeed==null?1:clamp(d.macroSpeed,.25,3);
+            if(['virtual','physical'].includes(d.macroRecordSource))p.macroRecordSource=d.macroRecordSource;
             p.holdTimeout=d.holdTimeout==null?0:clamp(d.holdTimeout,0,600);
             p.playbackLimit=d.playbackLimit==null?0:clamp(d.playbackLimit,0,3600);
             const validKey=v=>typeof v==='string'&&/^(F(?:[3-9]|1[0-2])|Key[A-Z]|Digit[0-9])$/.test(v);
@@ -182,10 +183,10 @@
 
     class PhysicalGamepadMonitor {
         constructor(virtual) {this.virtual=virtual; this.state=blank(); this.lastActivity=-Infinity; this.active=false; this.connected=false; this.id=''; this.lastIndex=null;}
-        poll(now) {
+        poll(now,pinnedIndex=null) {
             const pads=this.virtual.readPhysical().filter(p=>p?.connected);
             const active=p=>p.buttons.some(b=>b.pressed||b.value>0.05)||p.axes.some(a=>Math.abs(a)>0.15);
-            const p=pads.find(active)||pads.find(p=>p.index===this.lastIndex)||pads[0];
+            const p=pinnedIndex!==null?pads.find(p=>p.index===pinnedIndex):pads.find(active)||pads.find(p=>p.index===this.lastIndex)||pads[0];
             this.connected=!!p; this.active=!!p&&active(p); this.state=blank(); this.id=p?.id||'';
             if(p) {this.lastIndex=p.index; this.state.buttons=this.state.buttons.map((_,i)=>clamp(p.buttons[i]?.value??(p.buttons[i]?.pressed?1:0),0,1));
                 this.state.axes=this.state.axes.map((_,i)=>clamp(p.axes[i]||0,-1,1));}
@@ -226,10 +227,13 @@
             input.onChange=()=>this.capture();
         }
         select(slot) {this.stop(); this.slot=slot;}
-        record() {this.stop(); this.recording=true; this.started=null; this.events=[]; this.last=blank(); this.capture();}
+        record(getState=null,{source='virtual',physicalIndex=null}={}) {
+            this.stop();this.recordState=getState||(()=>this.input.recordingState());this.recordSource=source;this.physicalIndex=physicalIndex;
+            this.recording=true; this.started=null; this.events=[]; this.last=blank(); this.capture();
+        }
         capture(force=false) {
             if(!this.recording) return;
-            const state=this.input.recordingState(); const now=this.clock();
+            const state=this.recordState(); const now=this.clock();
             for(const [type,field] of [['btn','buttons'],['axis','axes']]) state[field].forEach((raw,id)=>{
                 const val=Math.round(raw*100)/100; const old=this.last[field][id];
                 const endpoint=val===0||Math.abs(val)===1;
@@ -361,7 +365,9 @@
         static validate(doc) {
             if(!doc||doc.format!=='better-xcloud-config'||doc.version!==1||!doc.settings||Array.isArray(doc.settings))throw Error('不是支援的完整備份（格式版本 1）。');
             if(new TextEncoder().encode(JSON.stringify(doc)).length>MacroBackup.MAX_BYTES)throw Error('備份超過 16 MB。');
-            const d=doc.settings,defaults=DEFAULTS();
+            const d=clone(doc.settings),defaults=DEFAULTS();
+            // v15.0.0～15.0.2 完整備份沒有來源設定，仍可還原為虛擬錄製。
+            if(!('macroRecordSource' in d))d.macroRecordSource='virtual';
             for(const key of Object.keys(defaults))if(!(key in d))throw Error(`備份缺少 ${key}。`);
             MacroBackup.validate({format:'better-xcloud-macros',version:1,macros:[1,2,3,4,5,6].map(slot=>({slot,...d.macros?.[slot]}))});
             for(let s=1;s<=6;s++){
@@ -615,15 +621,39 @@
         macroPage() {
             const page=el('div');const slotsRow=el('div','slots');this.macroSlots=[];
             for(let s=1;s<=6;s++){const b=button(String(s),()=>{this.app.macro.select(s);this.refresh();});this.macroSlots.push(b);slotsRow.append(b);}
-            const row=el('div','row');
-            row.append(button('● 錄製',()=>{this.app.stopAll();this.app.macro.record();this.refresh();}),
-                button('■ 停止',()=>{this.app.macro.stop();this.refresh();}),
-                button('▶ 播放',()=>this.app.playMacro(false)),button('↻ 循環',()=>this.app.playMacro(true)),
-                button('清除',()=>{if(confirm('清除此巨集槽位？')){this.app.macro.clear();this.refresh();}},'danger'));
+            const style=el('style');style.textContent=`
+                .macro-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0}
+                .macro-action{display:flex;align-items:center;justify-content:center;gap:9px;min-height:46px;font-size:13px;padding:8px}
+                .macro-action svg{width:24px;height:24px;flex:none;pointer-events:none}
+                .macro-action.record svg{color:#ff6868}.macro-action.play svg{color:#57e5a1}.macro-action.loop svg{color:#71baff}.macro-action.stop svg{color:#f4c571}
+                .record-source{display:flex;gap:7px;flex-wrap:wrap;margin:6px 0}.record-source button{min-height:38px;flex:1;font-size:12px}
+                .record-source-state{overflow-wrap:anywhere;margin-bottom:8px}
+            `;page.append(style);
+            const sourceRow=el('div','record-source');sourceRow.setAttribute('role','group');sourceRow.setAttribute('aria-label','錄製來源');this.recordSourceButtons={};
+            for(const [source,label] of [['virtual','虛擬操作'],['physical','實體手把']]){
+                const b=button(label,()=>{if(this.app.macro.recording)return;const old=this.p.macroRecordSource;this.p.macroRecordSource=source;
+                    if(!this.config.save()){this.p.macroRecordSource=old;this.app.notice('錄製來源儲存失敗，已恢復原設定。');}this.refreshStatus();});
+                this.recordSourceButtons[source]=b;sourceRow.append(b);
+            }
+            this.recordSourceState=el('div','meta record-source-state');this.recordSourceState.setAttribute('role','status');
+            const action=(kind,label,fn)=>{
+                const b=button('',fn,`macro-action ${kind}`),icon=document.createElementNS('http://www.w3.org/2000/svg','svg');
+                icon.setAttribute('viewBox','0 0 24 24');icon.setAttribute('aria-hidden','true');
+                const shapes={record:'<circle cx="12" cy="12" r="8" fill="currentColor"/>',play:'<path d="M6 3L21 12L6 21Z" fill="currentColor"/>',
+                    loop:'<path d="M20 10A8 8 0 0 0 6 5M4 14A8 8 0 0 0 18 19M6 1v5h5M18 23v-5h-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>',
+                    stop:'<rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor"/>'};
+                icon.innerHTML=shapes[kind];b.append(icon,el('span','',label));return b;
+            };
+            const row=el('div','macro-actions');this.recordButton=action('record','錄製',()=>this.app.startRecording());
+            this.stopButton=action('stop','停止',()=>{this.app.macro.stop();this.refresh();});
+            this.playButton=action('play','播放',()=>this.app.playMacro(false));this.loopButton=action('loop','循環播放',()=>this.app.playMacro(true));
+            row.append(this.recordButton,this.playButton,this.loopButton,this.stopButton);
+            const clearRow=el('div','row');clearRow.append(button('清除',()=>{if(confirm('清除此巨集槽位？')){this.app.macro.clear();this.refresh();}},'danger'));
             const nameRow=el('label','setting');nameRow.append(el('span','','巨集名稱'));this.macroName=el('input');this.macroName.type='text';this.macroName.maxLength=60;
             this.macroName.onchange=()=>{if(this.macroBusy())return;const macro=this.p.macros[this.app.macro.slot],old=macro.name;macro.name=this.macroName.value.trim();if(!this.config.save()){macro.name=old;this.backupMessage.textContent='名稱儲存失敗。';}this.refreshStatus();};nameRow.append(this.macroName);
             this.macroStatus=el('div','meta');
-            page.append(slotsRow,nameRow,row,this.macroStatus,el('div','hint','第一次操作才開始計時；按下停止前的等待也會保存。手動遊戲輸入會停止播放。'),this.backupPage());
+            page.append(slotsRow,nameRow,el('div','meta','錄製來源'),sourceRow,this.recordSourceState,row,clearRow,this.macroStatus,
+                el('div','hint','第一次操作才開始計時；按下停止前的等待也會保存。實體錄製只讀取開始時選定的手把，保留按鍵、搖桿與 LT／RT 深度；播放時套用目前映射與曲線。'),this.backupPage());
             return page;
         }
         macroBusy() {return this.app.macro.playing||this.app.macro.recording;}
@@ -753,6 +783,7 @@
             this.controls.append(top,row);
         }
         tick(now,state) {
+            this.refreshRecordingControls();
             for(const [id,t] of this.tapStates)if(t.due!==null&&now>=t.due){t.due=null;
                 if(this.p.comboTaps&&this.p.gameMode==='standard'&&!this.app.layout.editing){const mode=t.count===2?'interval':'hold';this.setMode(id,this.app.auto.mode(id)===mode?'none':mode);}t.count=0;}
             for(const {id,node} of this.buttons){node.classList.toggle('active',state.buttons[id]>0.05);
@@ -761,7 +792,7 @@
                 styleValue(knob,'transform',`translate(${state.axes[axis]*radius}px,${state.axes[axis+1]*radius}px)`);
                 node.classList.toggle('active',Math.hypot(state.axes[axis],state.axes[axis+1])>0.15);}
             const m=this.app.macro;
-            const msg=m.recording?(m.started===null?'等待第一次操作…':`● 錄製中 ${((now-m.started)/1000).toFixed(1)} 秒`):m.playing?`${m.loop?'↻ 循環':'▶ 播放'} 槽位 ${m.slot}`:
+            const msg=m.recording?(m.started===null?'錄製已準備 · 等待第一次操作…':`錄製中 · ${m.recordSource==='physical'?'實體手把':'虛擬操作'} · ${((now-m.started)/1000).toFixed(1)} 秒`):m.playing?`${m.loop?'循環播放':'播放中'} · 槽位 ${m.slot}`:
                 `槽位 ${m.slot}：${this.p.macros[m.slot].events.length} 筆 / ${(this.p.macros[m.slot].duration/1000).toFixed(1)} 秒`;
             if(this.macroStatus.textContent!==msg)this.macroStatus.textContent=msg;
             const sig=JSON.stringify([...this.app.auto.modes].map(([id,v])=>[id,v.mode]))+this.app.racing.afk+m.playing+m.recording+m.slot;
@@ -771,12 +802,21 @@
             this.status.replaceChildren();for(const [id,m] of this.app.auto.modes)this.status.append(button(`${LABELS[id]} ${m.mode==='hold'?'鎖定':'連發'} ×`,()=>this.setMode(id,'none')));
             if(this.app.racing.afk)this.status.append(button('AFK ×',()=>{this.app.racing.stop();this.refresh();}));
             const m=this.app.macro;if(m.playing||m.recording)this.status.append(button(`巨集 ${m.slot} ${m.recording?'錄製':'播放'} ■`,()=>{m.stop();this.refresh();}));
+            this.refreshRecordingControls();
             this.macroSlots.forEach((b,i)=>{const data=this.p.macros[i+1];b.classList.toggle('on',m.slot===i+1);b.textContent=`${i+1}${data.events.length?' •':''}${data.name?' '+data.name:''}`;b.title=data.name||`槽位 ${i+1}`;});
             this.macroName.disabled=this.importBtn.disabled=!!this.macroBusy();
             this.exportOne.disabled=this.exportAll.disabled=!!m.recording;
             if(this.app.shadow.activeElement!==this.macroName||this.macroName.dataset.slot!==String(m.slot)){this.macroName.value=this.p.macros[m.slot].name||'';this.macroName.dataset.slot=String(m.slot);}
             if(this.importApply){this.importApply.disabled=this.importSource.disabled=!!this.macroBusy();this.importTarget.disabled=this.macroBusy()||this.importSource.value==='all';}
             this.afkBtn.classList.toggle('on',this.app.racing.afk);this.afkBtn.textContent=this.app.racing.afk?'停止 AFK 擺頭':'啟動 AFK 擺頭';
+        }
+        refreshRecordingControls() {
+            const m=this.app.macro,physical=this.p.macroRecordSource==='physical',monitor=this.app.physical;
+            for(const [source,b] of Object.entries(this.recordSourceButtons)){b.disabled=m.recording;b.classList.toggle('on',source===this.p.macroRecordSource);b.setAttribute('aria-pressed',String(source===this.p.macroRecordSource));}
+            this.recordButton.disabled=m.recording||this.app.layout.editing||(physical&&!monitor.connected);
+            this.playButton.disabled=this.loopButton.disabled=m.recording;this.stopButton.disabled=!m.recording&&!m.playing;
+            this.recordSourceState.textContent=m.recording?`錄製中 · ${m.recordSource==='physical'?'實體手把（來源已固定）':'虛擬操作'}`:
+                physical?(monitor.connected?`已連接：${monitor.id}`:'未連接實體手把 · 請連接並按一下手把按鍵'):'目前來源：畫面上的虛擬操作';
         }
         refresh() {
             this.root.classList.toggle('help-off',!this.p.showHelp);this.app.racingView?.area.classList.toggle('help-off',!this.p.showHelp);
@@ -1143,6 +1183,19 @@
             this.config.save();this.panel.refresh();this.updateVisibility();
         }
         playMacro(loop,slot=this.macro.slot) {if(this.macro.recording){this.notice('請先停止錄製，再播放巨集。');return;}this.stopAll();this.macro.slot=slot;if(!this.macro.play(loop))this.notice(`槽位 ${slot} 沒有可播放的動作。`);this.panel.refresh();}
+        startRecording() {
+            if(this.macro.recording)return;
+            if(this.layout.editing){this.notice('請先完成佈局編輯，再錄製巨集。');return;}
+            const source=this.config.prefs.macroRecordSource;
+            if(source==='physical'){
+                this.physical.poll(this.clock());
+                if(!this.physical.connected){this.notice('未連接實體手把，無法開始錄製。');this.panel.refresh();return;}
+            }
+            this.stopAll();
+            const physicalIndex=source==='physical'?this.physical.lastIndex:null;
+            this.macro.record(source==='physical'?()=>this.physical.state:null,{source,physicalIndex});
+            this.override=false;this.updateVisibility();this.panel.refresh();
+        }
         clampElement(node) {
             if(!node||node.hidden)return;const rect=node.getBoundingClientRect();
             // CSS left/top 是視窗座標，不需除以 scale。
@@ -1185,13 +1238,18 @@
         }
         loop() {
             if(this.destroyed)return;
-            const now=this.clock();this.physical.poll(now);
-            const shouldOverride=this.physical.connected&&now-this.physical.lastActivity<2500&&now>=this.manualUntil&&!this.layout.editing&&!this.pointers.busy;
+            const now=this.clock(),physicalRecording=this.macro.recording&&this.macro.recordSource==='physical';
+            this.physical.poll(now,physicalRecording?this.macro.physicalIndex:null);
+            if(physicalRecording){
+                if(this.physical.connected)this.macro.capture();
+                else{this.macro.stopRecording();this.panel.refresh();this.notice('錄製來源手把已斷線，已停止並保存本次錄製。');}
+            }
+            const shouldOverride=this.physical.connected&&now-this.physical.lastActivity<2500&&now>=this.manualUntil&&!this.layout.editing&&!this.pointers.busy&&!this.macro.recording;
             if(shouldOverride!==this.override){this.override=shouldOverride;if(!shouldOverride)this.panel.refresh();}
             this.auto.tick(now);this.macro.tick(now);this.racing.tick(now);
             this.shortcuts.tick(now);this.advanced.tick(now);
             const virtualState=this.rawSnapshot();
-            const combo=(virtualState.buttons[10]>0.05&&virtualState.buttons[11]>0.05)||(this.physical.state.buttons[10]>0.05&&this.physical.state.buttons[11]>0.05);
+            const combo=!this.macro.recording&&((virtualState.buttons[10]>0.05&&virtualState.buttons[11]>0.05)||(this.physical.state.buttons[10]>0.05&&this.physical.state.buttons[11]>0.05));
             if(combo){if(this.comboSince===null)this.comboSince=now;if(!this.comboFired&&now-this.comboSince>=1500){this.comboFired=true;this.shortcut();}}
             else {this.comboSince=null;this.comboFired=false;}
             this.virtual.sync(this.virtual.readPhysical());this.updateVisibility();this.updatePanelFade(now);
