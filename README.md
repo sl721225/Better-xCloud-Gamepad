@@ -5,13 +5,13 @@
 ## 安裝
 
 1. 在瀏覽器安裝 Tampermonkey 或 Violentmonkey。
-2. 開啟 `Better-xCloud-Gamepad.user.js`。
+2. 從 [正式 Releases](https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest) 安裝 `Better-xCloud-Gamepad.user.js`，或開啟本倉庫同名檔案。
 3. 將完整內容貼入新腳本並儲存。
 4. 重新整理 Xbox Cloud Gaming 頁面。
 
 ## 目前版本
 
-`v14.1.0`
+`v15.1.3`
 
 ## 巨集備份
 

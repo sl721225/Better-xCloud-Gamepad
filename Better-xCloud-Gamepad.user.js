@@ -1,7 +1,9 @@
 // ==UserScript==
 // @name         Better xCloud Gamepad v14 (模組重建版)
 // @namespace    http://tampermonkey.net/
-// @version      14.1.0
+// @version      15.1.3
+// @updateURL    https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
+// @downloadURL  https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
 // @author       You
 // @match        *://*.xbox.com/*
@@ -11,8 +13,8 @@
 // ==/UserScript==
 
 /*
- * v14.1.0 — 完整單檔，無外部相依。頂部巨集、說明開關、巨集命名與 JSON 備份／還原。
- * 沿用 v14 的儲存 key。備份檔只包含巨集，不包含佈局／介面設定。
+ * v15.1.3 — 觸控功能鍵獨立置頂置中、操作時面板自動淡化。
+ * 沿用 v14 的名稱、namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
  * 紅色「全停」：停止巨集、AFK、連發、鎖定與手動輸入。
@@ -22,7 +24,7 @@
  */
 (function () {
     'use strict';
-    const VERSION = '14.1.0';
+    const VERSION = '15.1.3';
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(Number(v)) ? Number(v) : 0));
     const clone = value => JSON.parse(JSON.stringify(value));
     const slots = factory => Object.fromEntries(Array.from({length: 6}, (_, i) => [i + 1, factory()]));
@@ -33,7 +35,14 @@
         stick_0:'leftStick','10':'leftStick',stick_2:'rightStick','11':'rightStick'};
     const DEFAULTS = () => ({delay:3000, bgTrans:false, afkAmp:0.2, gameMode:'standard', comboTaps:false, racingAutoFade:true, showHelp:true,
         splitMode:false, uiScale:1, showViewer:false, viewerScale:0.8, viewerPos:{x:'20px',y:'20px'},
-        panelPos:null, layoutSlot:1, layouts:slots(() => ({})), macros:slots(() => ({name:'',duration:0,events:[]}))});
+        panelPos:null, layoutSlot:1, layouts:slots(() => ({})), macros:slots(() => ({name:'',duration:0,events:[]})),
+        layoutNames:slots(()=>''),axisTuning:[0,1].map(()=>({deadzone:0,sensitivity:1,max:1,curve:'linear',invertX:false,invertY:false})),
+        buttonMap:Array.from({length:17},(_,i)=>i),physicalMapping:false,macroSpeed:1,macroRecordSource:'virtual',
+        keyboardMacros:false,comboMacros:false,showQuickbar:true,quickbarCollapsed:true,
+        macroKeys:['F3','F4','F5','F6','F7','F8'],macroCombos:[[4,0],[4,1],[4,2],[4,3],[5,0],[5,1]],
+        emergencyKey:'F9',emergencyEnabled:true,holdTimeout:0,playbackLimit:0,
+        touchAutoFade:true,controlStyle:'panel',touchPanelPos:{x:'15px',y:'15px'},touchLayouts:slots(()=>({})),racingLayouts:slots(()=>({})),
+        touchButtonSize:1,touchStickSize:1,touchHitPadding:4,touchOpacityLeft:.75,touchOpacityRight:.75,touchOpacityUtility:.7});
 
     class ConfigStore {
         constructor(storage, warn = console.warn) {
@@ -42,7 +51,27 @@
         }
         sanitize(data) {
             const p = DEFAULTS(); const d = data && typeof data === 'object' ? data : {};
-            ['bgTrans','comboTaps','splitMode','showViewer','racingAutoFade','showHelp'].forEach(k => {if (typeof d[k] === 'boolean') p[k]=d[k];});
+            ['touchAutoFade','bgTrans','comboTaps','splitMode','showViewer','racingAutoFade','showHelp','physicalMapping','keyboardMacros','comboMacros','showQuickbar','quickbarCollapsed','emergencyEnabled'].forEach(k => {if (typeof d[k] === 'boolean') p[k]=d[k];});
+            p.macroSpeed=d.macroSpeed==null?1:clamp(d.macroSpeed,.25,3);
+            if(['virtual','physical'].includes(d.macroRecordSource))p.macroRecordSource=d.macroRecordSource;
+            if(['panel','touch'].includes(d.controlStyle))p.controlStyle=d.controlStyle;
+            for(const key of ['touchButtonSize','touchStickSize'])p[key]=d[key]==null?1:clamp(d[key],.7,1.4);
+            p.touchHitPadding=d.touchHitPadding==null?4:clamp(d.touchHitPadding,0,8);
+            for(const key of ['touchOpacityLeft','touchOpacityRight','touchOpacityUtility'])p[key]=d[key]==null?p[key]:clamp(d[key],.2,1);
+            p.holdTimeout=d.holdTimeout==null?0:clamp(d.holdTimeout,0,600);
+            p.playbackLimit=d.playbackLimit==null?0:clamp(d.playbackLimit,0,3600);
+            const validKey=v=>typeof v==='string'&&/^(F(?:[3-9]|1[0-2])|Key[A-Z]|Digit[0-9])$/.test(v);
+            if(validKey(d.emergencyKey))p.emergencyKey=d.emergencyKey;
+            for(let i=0;i<6;i++){
+                if(validKey(d.macroKeys?.[i]))p.macroKeys[i]=d.macroKeys[i];
+                const c=d.macroCombos?.[i];if(Array.isArray(c)&&c.length===2&&c.every(n=>Number.isInteger(n)&&n>=0&&n<17)&&c[0]!==c[1])p.macroCombos[i]=[...c];
+            }
+            for(let i=0;i<17;i++)if(Number.isInteger(d.buttonMap?.[i])&&d.buttonMap[i]>=0&&d.buttonMap[i]<17)p.buttonMap[i]=d.buttonMap[i];
+            for(let i=0;i<2;i++){
+                const t=d.axisTuning?.[i];if(!t||typeof t!=='object')continue;
+                p.axisTuning[i]={deadzone:clamp(t.deadzone??0,0,.45),sensitivity:clamp(t.sensitivity??1,.2,3),max:clamp(t.max??1,.1,1),
+                    curve:['linear','soft','fast'].includes(t.curve)?t.curve:'linear',invertX:t.invertX===true,invertY:t.invertY===true};
+            }
             p.delay = d.delay == null ? p.delay : clamp(d.delay,100,10000);
             p.afkAmp = d.afkAmp == null ? p.afkAmp : clamp(d.afkAmp,0.1,0.5);
             p.gameMode = d.gameMode === 'racing' ? 'racing' : 'standard';
@@ -52,12 +81,18 @@
             const point = v => v && Number.isFinite(parseFloat(v.x)) && Number.isFinite(parseFloat(v.y))
                 ? {x:`${clamp(parseFloat(v.x),-20000,20000)}px`,y:`${clamp(parseFloat(v.y),-20000,20000)}px`} : null;
             p.viewerPos = point(d.viewerPos) || p.viewerPos; p.panelPos = point(d.panelPos);
+            p.touchPanelPos=point(d.touchPanelPos)||p.touchPanelPos;
             for (let s=1;s<=6;s++) {
+                if(typeof d.layoutNames?.[s]==='string')p.layoutNames[s]=d.layoutNames[s].trim().slice(0,60);
                 const layout = d.layouts?.[s];
                 for (const id of [...Object.keys(GROUPS),'16']) {
                     const pos = layout?.[id];
                     if (pos && Number.isFinite(Number(pos.x)) && Number.isFinite(Number(pos.y)))
                         p.layouts[s][id]={x:clamp(pos.x,-10000,10000),y:clamp(pos.y,-10000,10000)};
+                    const race=d.racingLayouts?.[s]?.[id];
+                    if(race&&Number.isFinite(Number(race.x))&&Number.isFinite(Number(race.y)))p.racingLayouts[s][id]={x:clamp(race.x,-10000,10000),y:clamp(race.y,-10000,10000)};
+                    const touch=d.touchLayouts?.[s]?.[id];
+                    if(touch&&Number.isFinite(Number(touch.x))&&Number.isFinite(Number(touch.y)))p.touchLayouts[s][id]={x:clamp(touch.x,-10000,10000),y:clamp(touch.y,-10000,10000)};
                 }
                 const m = d.macros?.[s];
                 if (m && Array.isArray(m.events)) {
@@ -76,14 +111,14 @@
                 if (!raw) continue;
                 try {
                     const doc = JSON.parse(raw);
-                    if (key===this.key && doc.version>14) {this.writable=false; this.warn('設定來自較新版本，停止覆寫。');}
+                    if (key===this.key && doc.version>15) {this.writable=false; this.warn('設定來自較新版本，停止覆寫。');}
                     this.prefs=this.sanitize(doc.settings || doc); return;
                 } catch (e) {this.warn(`設定 ${key} 無法解析；保留原始內容。`,e); if(key===this.key) this.writable=false;}
             }
         }
         save() {
             if(!this.writable) return false;
-            try {this.storage.setItem(this.key,JSON.stringify({version:14,build:VERSION,settings:this.prefs})); return true;}
+            try {this.storage.setItem(this.key,JSON.stringify({version:15,build:VERSION,settings:this.prefs})); return true;}
             catch(e) {this.warn('設定儲存失敗；目前操作仍可使用，請勿重新整理。',e); return false;}
         }
     }
@@ -144,7 +179,7 @@
             if(changed||!this.pad.timestamp) this.pad.timestamp=this.input.clock();
         }
         install() {
-            this.hook=()=>{const pads=this.readPhysical(); this.sync(pads); pads[this.slot]=this.pad; return pads;};
+            this.hook=()=>{const pads=this.readPhysical(); this.sync(pads);const out=pads.map(p=>this.pipeline?.physical(p)||p);out[this.slot]=this.pad;return out;};
             Object.defineProperty(this.nav,'getGamepads',{value:this.hook,configurable:true,writable:true});
             this.sync(this.readPhysical());
         }
@@ -159,10 +194,10 @@
 
     class PhysicalGamepadMonitor {
         constructor(virtual) {this.virtual=virtual; this.state=blank(); this.lastActivity=-Infinity; this.active=false; this.connected=false; this.id=''; this.lastIndex=null;}
-        poll(now) {
+        poll(now,pinnedIndex=null) {
             const pads=this.virtual.readPhysical().filter(p=>p?.connected);
             const active=p=>p.buttons.some(b=>b.pressed||b.value>0.05)||p.axes.some(a=>Math.abs(a)>0.15);
-            const p=pads.find(active)||pads.find(p=>p.index===this.lastIndex)||pads[0];
+            const p=pinnedIndex!==null?pads.find(p=>p.index===pinnedIndex):pads.find(active)||pads.find(p=>p.index===this.lastIndex)||pads[0];
             this.connected=!!p; this.active=!!p&&active(p); this.state=blank(); this.id=p?.id||'';
             if(p) {this.lastIndex=p.index; this.state.buttons=this.state.buttons.map((_,i)=>clamp(p.buttons[i]?.value??(p.buttons[i]?.pressed?1:0),0,1));
                 this.state.axes=this.state.axes.map((_,i)=>clamp(p.axes[i]||0,-1,1));}
@@ -175,8 +210,10 @@
         constructor(input,config,clock) {this.input=input; this.config=config; this.clock=clock; this.modes=new Map(); this.pulses=new Map();}
         mode(id) {return this.modes.get(Number(id))?.mode||'none';}
         set(id,mode) {
-            id=Number(id); this.input.clear(`auto:${id}`); this.modes.delete(id);
-            if(mode==='hold'||mode==='interval') this.modes.set(id,{mode,start:this.clock()});
+            id=Number(id);const previous=this.mode(id),now=this.clock(); this.input.clear(`auto:${id}`); this.modes.delete(id);
+            // 連發可能正處於按下階段；同步清除再按下不會被遊戲輪詢看到。
+            // 切成鎖定前輸出短暫放開，再持續按下，讓遊戲收到新的按下邊緣。
+            if(mode==='hold'||mode==='interval') this.modes.set(id,{mode,start:now,activateAt:now+(previous==='interval'&&mode==='hold'?80:0)});
             this.tick(this.clock());
         }
         cycle(id) {this.set(id,{none:'interval',interval:'hold',hold:'none'}[this.mode(id)]);}
@@ -185,7 +222,7 @@
         tick(now) {
             for(const [id,m] of this.modes) {
                 const delay=this.config.prefs.delay;
-                const on=m.mode==='hold'||(now-m.start)%delay<Math.min(100,delay*0.4);
+                const on=now>=(m.activateAt??m.start)&&(m.mode==='hold'||(now-m.start)%delay<Math.min(100,delay*0.4));
                 this.input.set(`auto:${id}`,'btn',id,on?1:0,20);
             }
             for(const [key,p] of this.pulses) if(now>=p.end) {this.pulses.delete(key);this.input.clear(key);}
@@ -201,10 +238,13 @@
             input.onChange=()=>this.capture();
         }
         select(slot) {this.stop(); this.slot=slot;}
-        record() {this.stop(); this.recording=true; this.started=null; this.events=[]; this.last=blank(); this.capture();}
+        record(getState=null,{source='virtual',physicalIndex=null}={}) {
+            this.stop();this.recordState=getState||(()=>this.input.recordingState());this.recordSource=source;this.physicalIndex=physicalIndex;
+            this.recording=true; this.started=null; this.events=[]; this.last=blank(); this.capture();
+        }
         capture(force=false) {
             if(!this.recording) return;
-            const state=this.input.recordingState(); const now=this.clock();
+            const state=this.recordState(); const now=this.clock();
             for(const [type,field] of [['btn','buttons'],['axis','axes']]) state[field].forEach((raw,id)=>{
                 const val=Math.round(raw*100)/100; const old=this.last[field][id];
                 const endpoint=val===0||Math.abs(val)===1;
@@ -227,14 +267,14 @@
         play(loop=false) {
             this.stop(); const m=this.config.prefs.macros[this.slot]; if(!m.events.length) return false;
             this.data=clone(m); this.data.duration=Math.max(1,this.data.duration,this.data.events.at(-1).t);
-            this.playing=true;this.loop=loop;this.index=0;this.playStart=this.clock();this.tick(this.playStart);return true;
+            this.speed=this.config.prefs.macroSpeed||1;this.playing=true;this.loop=loop;this.index=0;this.playStart=this.clock();this.runStart=this.playStart;this.tick(this.playStart);return true;
         }
         tick(now) {
             if(!this.playing) return;
-            let elapsed=now-this.playStart;
+            let elapsed=(now-this.playStart)*(this.speed||1);
             if(elapsed>=this.data.duration&&this.loop) {
-                this.playStart+=Math.floor(elapsed/this.data.duration)*this.data.duration;
-                elapsed=now-this.playStart;this.index=0;this.input.clear('macro');
+                this.playStart+=Math.floor(elapsed/this.data.duration)*this.data.duration/(this.speed||1);
+                elapsed=(now-this.playStart)*(this.speed||1);this.index=0;this.input.clear('macro');
             }
             while(this.index<this.data.events.length&&this.data.events[this.index].t<=elapsed) {
                 const e=this.data.events[this.index++]; this.input.set('macro',e.type,e.id,e.val,30);
@@ -301,6 +341,122 @@
         }
     }
 
+    class InputPipeline {
+        constructor(config) {this.config=config;}
+        process(raw) {
+            const out=blank(),p=this.config.prefs;
+            raw.buttons.forEach((v,i)=>{const target=p.buttonMap[i];out.buttons[target]=Math.max(out.buttons[target],v);});
+            for(let side=0;side<2;side++){
+                const t=p.axisTuning[side],x=raw.axes[side*2],y=raw.axes[side*2+1],r=Math.hypot(x,y);
+                if(t.deadzone===0&&t.sensitivity===1&&t.max===1&&t.curve==='linear') {
+                    out.axes[side*2]=x*(t.invertX?-1:1);out.axes[side*2+1]=y*(t.invertY?-1:1);continue;
+                }
+                if(r<=t.deadzone)continue;
+                let magnitude=clamp((Math.min(1,r)-t.deadzone)/(1-t.deadzone),0,1);
+                if(t.curve==='soft')magnitude=magnitude*magnitude;
+                if(t.curve==='fast')magnitude=Math.sqrt(magnitude);
+                magnitude=Math.min(t.max,magnitude*t.sensitivity);
+                out.axes[side*2]=x/r*magnitude*(t.invertX?-1:1);out.axes[side*2+1]=y/r*magnitude*(t.invertY?-1:1);
+            }
+            return out;
+        }
+        physical(pad) {
+            if(!this.config.prefs.physicalMapping||!pad)return pad;
+            const buttons=Array.from({length:17},(_,i)=>clamp(pad.buttons[i]?.value??(pad.buttons[i]?.pressed?1:0),0,1));
+            const out=this.process({buttons,axes:Array.from({length:4},(_,i)=>pad.axes[i]||0)});
+            // 不覆寫原生 Gamepad；回傳保留 index、id 等資料的代理。
+            return new Proxy(pad,{get:(target,key)=>key==='buttons'?out.buttons.map(value=>({value,pressed:value>.05,touched:value>0})):key==='axes'?out.axes:Reflect.get(target,key,target)});
+        }
+    }
+
+    class ConfigurationBackup {
+        static groups=['macros','layouts','settings'];
+        static settingKeys=Object.keys(DEFAULTS()).filter(k=>!['macros','layouts','touchLayouts','racingLayouts','layoutNames'].includes(k));
+        static encode(config) {const doc={format:'better-xcloud-config',version:1,appVersion:VERSION,exportedAt:new Date().toISOString(),settings:clone(config.prefs)};this.validate(doc);return JSON.stringify(doc,null,2);}
+        static validate(doc) {
+            if(!doc||doc.format!=='better-xcloud-config'||doc.version!==1||!doc.settings||Array.isArray(doc.settings))throw Error('不是支援的完整備份（格式版本 1）。');
+            if(new TextEncoder().encode(JSON.stringify(doc)).length>MacroBackup.MAX_BYTES)throw Error('備份超過 16 MB。');
+            const d=clone(doc.settings),defaults=DEFAULTS();
+            // v15.0.0～15.0.2 完整備份沒有來源設定，仍可還原為虛擬錄製。
+            if(!('macroRecordSource' in d))d.macroRecordSource='virtual';
+            for(const key of ['touchAutoFade','racingLayouts','controlStyle','touchPanelPos','touchLayouts','touchButtonSize','touchStickSize','touchHitPadding','touchOpacityLeft','touchOpacityRight','touchOpacityUtility'])if(!(key in d))d[key]=clone(defaults[key]);
+            for(const key of Object.keys(defaults))if(!(key in d))throw Error(`備份缺少 ${key}。`);
+            MacroBackup.validate({format:'better-xcloud-macros',version:1,macros:[1,2,3,4,5,6].map(slot=>({slot,...d.macros?.[slot]}))});
+            for(let s=1;s<=6;s++){
+                if(!d.layouts?.[s]||Array.isArray(d.layouts[s])||typeof d.layoutNames?.[s]!=='string'||d.layoutNames[s].length>60)throw Error('佈局資料不完整。');
+                for(const [id,v] of Object.entries(d.layouts[s]))if(![...Object.keys(GROUPS),'16'].includes(id)||!v||!Number.isFinite(v.x)||!Number.isFinite(v.y)||Math.abs(v.x)>10000||Math.abs(v.y)>10000)throw Error(`佈局 ${s} 有無效位移。`);
+                if(!d.touchLayouts?.[s]||Array.isArray(d.touchLayouts[s])||typeof d.touchLayouts[s]!=='object')throw Error('觸控佈局資料不完整。');
+                for(const [id,v] of Object.entries(d.touchLayouts[s]))if(![...Object.keys(GROUPS),'16'].includes(id)||!v||!Number.isFinite(v.x)||!Number.isFinite(v.y)||Math.abs(v.x)>10000||Math.abs(v.y)>10000)throw Error(`觸控佈局 ${s} 有無效位移。`);
+                if(!d.racingLayouts?.[s]||Array.isArray(d.racingLayouts[s])||typeof d.racingLayouts[s]!=='object')throw Error('賽車佈局資料不完整。');
+                for(const [id,v] of Object.entries(d.racingLayouts[s]))if(![...Object.keys(GROUPS),'16'].includes(id)||!v||!Number.isFinite(v.x)||!Number.isFinite(v.y)||Math.abs(v.x)>10000||Math.abs(v.y)>10000)throw Error(`賽車佈局 ${s} 有無效位移。`);
+            }
+            const checked=new ConfigStore({getItem:()=>null,setItem:()=>{}},()=>{}).sanitize(d);
+            // 備份用嚴格驗證：不容許無效數值被靜默修正。
+            const equal=(a,b)=>a===b||(a&&b&&typeof a==='object'&&typeof b==='object'&&Array.isArray(a)===Array.isArray(b)&&Object.keys(a).length===Object.keys(b).length&&Object.keys(a).every(k=>Object.hasOwn(b,k)&&equal(a[k],b[k])));
+            for(const key of this.settingKeys)if(!equal(d[key],checked[key]))throw Error(`設定 ${key} 無效。`);
+            if(new Set(d.macroKeys).size!==6||d.macroKeys.includes(d.emergencyKey))throw Error('巨集快捷鍵重複，或與急停鍵衝突。');
+            if(new Set(d.macroCombos.map(c=>[...c].sort((a,b)=>a-b).join(','))).size!==6)throw Error('巨集組合鍵重複。');
+            return checked;
+        }
+        static parse(text) {if(new TextEncoder().encode(text).length>MacroBackup.MAX_BYTES)throw Error('備份超過 16 MB。');let d;try{d=JSON.parse(text.replace(/^\uFEFF/,''));}catch{throw Error('JSON 無法解析。');}return this.validate(d);}
+        static commit(config,data,groups) {
+            if(!groups.length||groups.some(g=>!this.groups.includes(g)))throw Error('請選擇還原項目。');
+            const valid=this.validate({format:'better-xcloud-config',version:1,settings:data}),old=clone(config.prefs),next=clone(old);
+            if(groups.includes('macros'))next.macros=valid.macros;
+            if(groups.includes('layouts')){next.layouts=valid.layouts;next.touchLayouts=valid.touchLayouts;next.racingLayouts=valid.racingLayouts;next.layoutNames=valid.layoutNames;}
+            if(groups.includes('settings'))for(const key of this.settingKeys)next[key]=valid[key];
+            Object.assign(config.prefs,next);if(!config.save()){Object.assign(config.prefs,old);throw Error('儲存失敗，已還原原資料。');}
+        }
+    }
+
+    class MacroTimeline {
+        static normalize(value) {
+            const copy=clone(value);copy.events.sort((a,b)=>a.t-b.t);
+            return MacroBackup.validate({format:'better-xcloud-macros',version:1,macros:[{slot:1,...copy}]}).macros[0];
+        }
+        static save(config,slot,draft) {
+            const valid=this.normalize(draft),old=config.prefs.macros[slot];
+            config.prefs.macros[slot]={name:valid.name,duration:valid.duration,events:valid.events};
+            if(!config.save()){config.prefs.macros[slot]=old;throw Error('儲存失敗，原巨集未更動。');}
+        }
+    }
+
+    class ShortcutManager {
+        constructor(app) {
+            this.app=app;this.comboHeld=new Set();this.keyHeld=new Set();this.blocked=new Set();this.holdSince=new Map();
+            window.addEventListener('keydown',e=>{
+                const p=app.config.prefs;
+                if(p.emergencyEnabled&&e.code===p.emergencyKey&&!e.repeat){e.preventDefault();app.stopAll();app.notice('急停：已釋放所有虛擬輸入。');return;}
+                const editing=e.composedPath().some(n=>n?.matches?.('input,select,textarea,[contenteditable=true]'));
+                if(e.repeat||editing||e.ctrlKey||e.altKey||e.metaKey||e.shiftKey||!p.keyboardMacros||this.keyHeld.has(e.code))return;
+                const slot=p.macroKeys.indexOf(e.code)+1;if(!slot)return;
+                if(app.macro.recording||app.layout.editing)return;e.preventDefault();this.keyHeld.add(e.code);app.playMacro(false,slot);
+            },{signal:app.signal,capture:true});
+            window.addEventListener('keyup',e=>this.keyHeld.delete(e.code),{signal:app.signal});
+            window.addEventListener('blur',()=>{this.keyHeld.clear();this.comboHeld.clear();},{signal:app.signal});
+        }
+        tick(now) {
+            const a=this.app,p=a.config.prefs;
+            if(p.playbackLimit&&a.macro.playing&&now-a.macro.runStart>=p.playbackLimit*1000){a.macro.stop();a.notice('巨集已達播放時間上限，已停止。');}
+            const present=new Set();
+            for(const [key,state] of a.input.sources){
+                if(!/^(manual:|race:)/.test(key))continue;present.add(key);
+                const held=[...state.buttons.values()].some(v=>v>.05);
+                if(!held){this.holdSince.delete(key);continue;}
+                if(!this.holdSince.has(key))this.holdSince.set(key,now);
+                if(p.holdTimeout&&now-this.holdSince.get(key)>=p.holdTimeout*1000){a.input.clear(key);this.blocked.add(key);this.holdSince.delete(key);a.notice('長按已達保護上限；請放開後重新操作。');}
+            }
+            for(const key of this.holdSince.keys())if(!present.has(key))this.holdSince.delete(key);
+            if(!p.comboMacros){this.comboHeld.clear();return;}
+            const raw=a.rawSnapshot(key=>key!=='macro'&&key!=='afk'&&!key.startsWith('auto:'));
+            raw.buttons=raw.buttons.map((v,i)=>Math.max(v,a.physical.state.buttons[i]));
+            // 先鎖存整組，播放造成的輸入清除不會在同一幀重複觸發。
+            const active=p.macroCombos.map(c=>c.every(id=>raw.buttons[id]>.5));let trigger=0;
+            active.forEach((on,i)=>{if(on&&!this.comboHeld.has(i)&&!trigger)trigger=i+1;if(on)this.comboHeld.add(i);else this.comboHeld.delete(i);});
+            if(trigger&&!a.macro.recording&&!a.layout.editing)a.playMacro(false,trigger);
+        }
+    }
+
     // 唯一的全域拖曳事件組。每根手指各自拥有工作階段，取消只影響自己。
     class PointerManager {
         constructor(target,signal) {
@@ -313,7 +469,8 @@
         bind(el,start) {
             el.style.touchAction='none';
             el.addEventListener('pointerdown',e=>{
-                if(e.button!==0||this.sessions.has(e.pointerId)) return;
+                if(e.button!==0){if(e.button===2){e.preventDefault();e.stopPropagation();}return;}
+                if(this.sessions.has(e.pointerId)) return;
                 const session=start(e); if(!session) return;
                 e.preventDefault();e.stopPropagation(); session.el=el;this.sessions.set(e.pointerId,session);
                 try{el.setPointerCapture(e.pointerId);}catch{/* Detached test elements do not support capture. */}
@@ -330,7 +487,8 @@
     class LayoutManager {
         constructor(config) {this.config=config;this.items=new Map();this.editing=false;this.group=true;this.snap=true;this.dragging=false;}
         register(id,el) {this.items.set(String(id),el);this.apply();}
-        offsets() {return this.config.prefs.layouts[this.config.prefs.layoutSlot];}
+        collection() {const p=this.config.prefs;return p.gameMode==='racing'?p.racingLayouts:p.controlStyle==='touch'?p.touchLayouts:p.layouts;}
+        offsets() {return this.collection()[this.config.prefs.layoutSlot];}
         apply() {for(const [id,el] of this.items) {const p=this.offsets()[id]||{x:0,y:0};el.style.transform=`translate(${p.x}px,${p.y}px)`;}}
         drag(id,e,scale) {
             if(this.dragging) return null;this.dragging=true;
@@ -344,7 +502,7 @@
                 ids.forEach(i=>this.offsets()[i]={x:starts[i].x+dx,y:starts[i].y+dy});this.apply();
             },end:(_,cancel)=>{this.dragging=false;if(cancel){ids.forEach(i=>this.offsets()[i]=starts[i]);this.apply();}else this.config.save();}};
         }
-        reset() {this.config.prefs.layouts[this.config.prefs.layoutSlot]={};this.apply();this.config.save();}
+        reset() {this.collection()[this.config.prefs.layoutSlot]={};this.apply();this.config.save();}
     }
 
     class RacingController {
@@ -387,7 +545,9 @@
     button.on{background:#235341;color:#baffdc;border-color:#74efb4} button.danger{color:#ffaba9;border-color:#ff777766;background:#482c34}
     .panel,.viewer,.popup{position:fixed;pointer-events:auto;user-select:none;border:1px solid var(--line);border-radius:16px;background:#111c29ed;box-shadow:0 8px 30px #0005;transform-origin:top left}
     .panel{padding:10px;width:550px;z-index:5}.panel.transparent{background:transparent;box-shadow:none}.panel.transparent .controls{background:transparent}
-    .header,.row,.tabs,.status{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.header{justify-content:space-between;min-height:28px}
+    .header,.row,.tabs,.status{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.header{display:grid;grid-template-columns:auto auto 1fr auto;gap:8px;min-height:28px}
+    .toolbar-group{display:flex;align-items:center;gap:5px;white-space:nowrap}.toolbar-functions{border-left:1px solid var(--line);padding-left:8px}.toolbar-actions{border-left:1px solid var(--line);padding-left:8px;justify-self:end}
+    .compact-toolbar .header{grid-template-columns:auto 1fr auto;row-gap:6px}.compact-toolbar .toolbar-modes{grid-column:2 / 4}.compact-toolbar .toolbar-functions{grid-column:1 / 3;border-left:0;padding-left:0}.compact-toolbar .toolbar-actions{grid-column:3}
     .brand{font-size:11px;letter-spacing:.8px;color:var(--green);cursor:grab;touch-action:none;padding:7px 4px}
     .meta,.hint{font-size:10px;color:var(--muted);line-height:1.6}.hint{margin-top:8px}.status{margin-top:7px}.status:empty{display:none}
     .status button{font-size:10px;padding:4px 7px}.tabs{margin:10px 0;border-top:1px solid var(--line);padding-top:8px}
@@ -411,7 +571,7 @@
     .stickwrap.left{left:-8px}.stickwrap.right{left:8px}.stickwrap.right>.padkey{left:auto;right:-4px}
     .editing .padkey,.editing .stick{outline:1px dashed #ffda75;cursor:move}.editing .controls{background-image:radial-gradient(#ffe19944 1px,transparent 1px);background-size:10px 10px}
     .compact .playrow{gap:18px}.compact .zone{gap:12px}.compact .stick{width:50px;height:50px}.compact .knob{width:24px;height:24px}.compact .cross{grid-template-columns:repeat(3,24px);grid-template-rows:repeat(3,24px);gap:2px}.compact .cross .padkey{width:24px;height:24px;font-size:9px}
-    .split .playrow{justify-content:space-between}.racing-hint{margin-top:5px;color:var(--muted);font-size:10px}
+    .racing-hint{margin-top:5px;color:var(--muted);font-size:10px}
     .racearea{position:fixed;left:0;bottom:0;width:100vw;height:62vh;display:flex;pointer-events:none;z-index:1}.racezone{width:50%;height:100%;pointer-events:auto;touch-action:none;position:relative}.racezone>span{position:absolute;bottom:12px;left:20px;font-size:10px;color:#ffffff55;pointer-events:none}
     canvas{position:fixed;inset:0;pointer-events:none;z-index:2}
     .viewer{width:300px;padding:12px;z-index:4;cursor:grab;touch-action:none}.viewer .head{display:flex;justify-content:space-between;font-size:9px;color:var(--muted);letter-spacing:1px;margin-bottom:10px}
@@ -423,18 +583,118 @@
     .notice{position:fixed;top:12px;left:50%;transform:translateX(-50%);max-width:90vw;background:#512b31;color:#ffdedc;padding:10px 16px;border-radius:10px;z-index:20;pointer-events:auto;font-size:12px}
     `;
 
+    class TouchLayout {
+        constructor(app) {
+            this.app=app;this.panel=app.panel;this.p=app.config.prefs;this.active=false;this.scale=1;
+            const controls=this.panel.controls,top=controls.querySelector('.topkeys'),zones=controls.querySelectorAll('.playrow>.zone');
+            this.nodes={leftTop:top.children[0],utility:top.children[1],rightTop:top.children[2],
+                leftStick:zones[0].children[0],leftCross:zones[0].children[1],rightCross:zones[1].children[0],rightStick:zones[1].children[1]};
+            this.anchors=new Map();for(const node of Object.values(this.nodes)){const anchor=document.createComment('control home');node.before(anchor);this.anchors.set(node,anchor);}
+            this.root=el('div','touchdock');this.root.setAttribute('aria-label','觸控手把操作區');this.root.hidden=true;
+            this.left=el('div','touch-region touch-left');this.right=el('div','touch-region touch-right');this.root.append(this.left,this.right);app.shadow.append(this.root);
+            this.utility=el('div','touch-utility');this.utility.hidden=true;this.panel.status.before(this.utility);
+            const style=el('style');style.textContent=`
+                .touchdock{position:fixed;inset:0;z-index:3;pointer-events:none;user-select:none}
+                .touch-region{position:absolute;bottom:calc(14px + env(safe-area-inset-bottom,0px));width:var(--region-w);height:var(--region-h);pointer-events:none}
+                .touch-left{left:calc(14px + env(safe-area-inset-left,0px));transform-origin:bottom left}
+                .touch-right{right:calc(14px + env(safe-area-inset-right,0px));transform-origin:bottom right}
+                .touchdock .padkey,.touchdock .stick{pointer-events:auto}
+                .touchdock .padkey{width:var(--button)!important;height:var(--button)!important;min-width:0;font-size:14px;border-radius:11px;overflow:visible}
+                .touchdock .padkey::before{content:'';position:absolute;inset:calc(-1 * var(--hit));border-radius:inherit}
+                .touchdock .cross{position:absolute;bottom:var(--cross-y);width:var(--cross);height:var(--cross);grid-template-columns:repeat(3,var(--cell));grid-template-rows:repeat(3,var(--cell));gap:4px;place-items:center}
+                .touch-left>.cross{right:0}.touch-right>.cross{left:0}
+                .touchdock .face .padkey{border-radius:50%}
+                .touchdock .stickwrap{position:absolute;bottom:0;width:var(--stick);height:var(--stick)}
+                .touch-left>.stickwrap{left:0!important;right:auto}.touch-right>.stickwrap{right:0;left:auto!important}
+                .touchdock .stick{width:var(--stick);height:var(--stick)}
+                .touchdock .knob{width:calc(var(--stick) * .44);height:calc(var(--stick) * .44);font-size:12px}
+                .touchdock .stickwrap>.padkey{width:28px!important;height:28px!important;font-size:10px}
+                .touchdock .stickwrap>.padkey::before{inset:0}
+                .touchdock .touch-top{position:absolute;bottom:var(--top-y);gap:calc(var(--hit) * 2 + 8px)}
+                .touch-left>.touch-top{left:0}.touch-right>.touch-top{right:0}
+                .touchdock .touch-top .padkey{width:calc(var(--button) + 8px)!important;height:36px!important;font-size:12px}
+                .touch-utility{margin-top:7px}.utility-floating{position:fixed;top:15px;left:50%;margin:0;z-index:5;pointer-events:none;transform-origin:top center}.utility-floating .padkey{pointer-events:auto}.touch-utility>.cluster{gap:8px;justify-content:center}
+                .touch-utility .padkey{height:30px!important;min-width:34px;font-size:10px}
+                .race-dock .touch-region{top:var(--race-top);bottom:auto;transform-origin:top left}.race-dock .touch-right{transform-origin:top right}
+                .race-dock .touch-left>.stickwrap{bottom:var(--race-stick-y)}.race-dock .touch-left>.cross{bottom:0;left:0;right:auto}
+                .race-dock .touch-right>.cross{left:auto;right:0}
+                .race-dock .touch-top{position:fixed!important;top:calc(14px + env(safe-area-inset-top,0px));bottom:auto!important}
+                .touchdock.editing .padkey::before{outline:1px dashed #ffdb75;background:#ffdb7510}
+                .touchdock.editing .stick{outline:1px dashed #ffdb75;cursor:move}
+                .touchdock.editing .touch-region{background-image:radial-gradient(#ffe19933 1px,transparent 1px);background-size:10px 10px}
+                .panel.touch-mode.editing .touch-utility,.panel.touch-mode.editing .hint,.panel.touch-mode.editing .v15-card,
+                .panel.touch-mode.editing .tools .slots,.panel.touch-mode.editing [aria-label="操作佈局"]{display:none}
+            `;app.shadow.append(style);
+        }
+        positionPanel() {
+            const p=this.p,r=this.panel.root;
+            const point=this.active?p.touchPanelPos:p.panelPos;
+            r.style.left=p.gameMode==='racing'?'15px':point?.x||'15px';
+            r.style.top=p.gameMode==='racing'?'15px':point?.y||(this.active?'15px':`${Math.max(15,window.innerHeight-280*p.uiScale)}px`);
+        }
+        sync() {
+            const racing=this.p.gameMode==='racing',active=racing||this.p.controlStyle==='touch',modeChanged=this.racing!==racing;this.racing=racing;
+            if(active!==this.active){
+                this.app.pointers.cancelAll();this.active=active;
+                if(active){
+                    const n=this.nodes;n.leftTop.classList.add('touch-top');n.rightTop.classList.add('touch-top');
+                    this.left.append(n.leftTop,n.leftStick,n.leftCross);this.right.append(n.rightTop,n.rightStick,n.rightCross);this.utility.append(n.utility);
+                }else for(const [node,anchor] of this.anchors){anchor.after(node);node.classList.remove('touch-top');}
+                this.positionPanel();this.app.layout.apply();
+            }
+            if(active){const n=this.nodes;if(racing){this.root.append(n.leftTop,n.rightTop);n.leftTop.style.left='14px';n.rightTop.style.right='14px';}else{this.left.prepend(n.leftTop);this.right.prepend(n.rightTop);n.leftTop.style.left='';n.rightTop.style.right='';}}
+            if(active&&!racing){this.app.shadow.append(this.utility);this.utility.classList.add('utility-floating');}else{this.panel.status.before(this.utility);this.utility.classList.remove('utility-floating');this.utility.style.cssText='';}
+            this.root.classList.toggle('race-dock',racing);this.utility.hidden=!active||this.panel.collapsed;this.root.classList.toggle('editing',this.app.layout.editing);
+            if(modeChanged){this.positionPanel();this.app.layout.apply();this.root.style.opacity='1';}
+            if(active){
+                const p=this.p,button=36*p.touchButtonSize,hit=p.touchHitPadding,cell=button+hit*2+4,cross=cell*3+8,stick=100*p.touchStickSize;
+                const stacked=window.innerWidth<760,topY=stacked?stick+cross+24:stick+16,crossY=stacked?stick+12:42;
+                const sideWidth=Math.max(stick,2*(button+8)+hit*2+8);
+                const width=stacked?Math.max(cross,sideWidth):sideWidth+24+cross;
+                const height=Math.max(topY+36,crossY+cross,stick);
+                this.scale=Math.min(1,Math.max(.1,(window.innerWidth-44)/(2*width)),Math.max(.1,(window.innerHeight*.65-28)/height));
+                this.renderedHeight=height*this.scale;
+                for(const [key,value] of Object.entries({'--button':button,'--hit':hit,'--cell':cell,'--cross':cross,'--stick':stick,'--region-w':width,'--region-h':height,'--cross-y':crossY,'--top-y':topY}))this.root.style.setProperty(key,`${value}px`);
+                this.left.style.transform=this.right.style.transform=`scale(${this.scale})`;
+                this.left.style.opacity=this.app.layout.editing?'1':String(p.touchOpacityLeft);this.right.style.opacity=this.app.layout.editing?'1':String(p.touchOpacityRight);
+                this.utility.style.opacity=this.app.layout.editing?'1':String(p.touchOpacityUtility);
+                if(racing){
+                    const raceWidth=Math.max(cross,stick,sideWidth),raceHeight=cross+stick+18;
+                    this.scale=Math.min(1,(window.innerWidth-44)/(2*raceWidth),(window.innerHeight*.48)/raceHeight);
+                    this.root.style.setProperty('--region-w',`${raceWidth}px`);this.root.style.setProperty('--region-h',`${raceHeight}px`);
+                    this.root.style.setProperty('--race-stick-y',`${cross+18}px`);this.root.style.setProperty('--cross-y',`${stick+18}px`);
+                    this.left.style.transform=this.right.style.transform=`scale(${this.scale})`;
+                    this.root.style.setProperty('--race-top',`${Math.max(76,window.innerHeight*.42-raceHeight*this.scale/2)}px`);
+                    this.renderedHeight=0;
+                }
+            }
+            this.updateVisibility();
+        }
+        positionUtility() {
+            if(!this.utility.classList.contains('utility-floating'))return;
+            const scale=Math.min(this.p.uiScale,(window.innerWidth-24)/180);this.utility.style.transform=`translateX(-50%) scale(${scale})`;this.utility.style.top='15px';
+            const u=this.utility.getBoundingClientRect(),p=this.panel.root.getBoundingClientRect();
+            if(!this.panel.root.hidden&&u.left<p.right+8&&u.right>p.left-8&&u.top<p.bottom+8)this.utility.style.top=`${p.bottom+8}px`;
+        }
+        updateVisibility() {this.root.hidden=!this.active||this.panel.collapsed||this.app.override;this.utility.hidden=!this.active||this.panel.collapsed||this.app.override||(this.app.layout.editing&&this.utility.classList.contains('utility-floating'));}
+
+    }
+
     class ControlPanel {
         constructor(app) {
             this.app=app;this.config=app.config;this.p=this.config.prefs;this.root=el('section','panel');
             this.root.setAttribute('aria-label','虛擬手把控制面板');this.collapsed=false;this.tab=null;this.dirty=true;
             this.buttons=[];this.sticks=[];this.tapStates=new Map();
-            this.header=el('div','header');this.drag=el('span','brand','⠿  XCLOUD / 14');
+            this.header=el('div','header');this.drag=el('span','brand','⠿');this.drag.title='拖曳面板';this.drag.setAttribute('aria-label','拖曳面板');
             this.collapseBtn=button('收合',()=>{app.pointers.cancelAll();this.collapsed=!this.collapsed;this.refresh();});
-            this.modeBtn=button('',()=>app.changeMode());this.toolBtn=button('工具',()=>this.openTab(this.tab&&this.tab!=='macro'?null:'settings'));
+            this.modeBtn=button('',()=>app.changeMode());this.toolBtn=button('設定 ⚙',()=>this.openTab(this.tab==='settings'&&!this.collapsed?null:'settings'));
             this.macroQuick=button('巨集',()=>this.openTab(this.tab==='macro'&&!this.collapsed?null:'macro'));
+            this.styleQuick=button('面板',()=>app.changeControlStyle());this.styleQuick.setAttribute('aria-label','快速切換標準／觸控佈局');
             this.helpBtn=button('?',()=>{this.p.showHelp=!this.p.showHelp;this.config.save();this.refresh();});this.helpBtn.setAttribute('aria-label','顯示操作說明');
-            this.stopBtn=button('全停',()=>app.stopAll(),'danger');
-            this.header.append(this.drag,this.modeBtn,this.macroQuick,this.helpBtn,this.toolBtn,this.collapseBtn,this.stopBtn);
+            this.stopBtn=button('■ 全停',()=>app.stopAll(),'danger');
+            const modes=el('div','toolbar-group toolbar-modes'),functions=el('div','toolbar-group toolbar-functions'),actions=el('div','toolbar-group toolbar-actions');
+            modes.append(this.modeBtn,this.styleQuick);functions.append(this.macroQuick,this.toolBtn,this.helpBtn);actions.append(this.collapseBtn,this.stopBtn);
+            this.header.append(this.drag,modes,functions,actions);
             this.status=el('div','status');this.status.setAttribute('aria-label','作用中狀態');
             this.tabs=el('div','tabs');this.tabButtons={};
             for(const [key,title] of [['settings','設定'],['macro','巨集'],['layout','佈局']]) {
@@ -446,7 +706,7 @@
             this.help=el('div','hint','右鍵：連發 → 鎖定 → 解除　｜　F2：解除連發／鎖定，否則收合');
             this.raceHint=el('div','racing-hint','左區：轉向／下拉 A　右區：上滑 RT、下滑 LT／右甩：B 進檔、左甩：X 退檔');
             this.root.append(this.header,this.status,this.tabs,this.tools,this.controls,this.help,this.raceHint);app.shadow.append(this.root);
-            app.dragElement(this.drag,this.root,()=>{this.p.panelPos={x:this.root.style.left,y:this.root.style.top};this.config.save();},()=>!(this.p.gameMode==='racing'&&!this.collapsed));
+            app.dragElement(this.drag,this.root,()=>{this.p[this.app.touch?.active?'touchPanelPos':'panelPos']={x:this.root.style.left,y:this.root.style.top};this.config.save();},()=>!(this.p.gameMode==='racing'&&!this.collapsed));
             this.root.style.left=this.p.panelPos?.x||'15px';this.root.style.top=this.p.panelPos?.y||`${Math.max(15,window.innerHeight-280*this.p.uiScale)}px`;
             this.refresh();
         }
@@ -467,8 +727,9 @@
             this.afkBtn=button('啟動 AFK 擺頭',()=>{this.app.manualStart();this.app.racing.afk=!this.app.racing.afk;this.app.racing.tick(this.app.clock());this.refresh();});page.append(this.afkBtn);
             this.selectSetting(page,'控制面板大小','uiScale',[.8,1,1.2,1.5].map(v=>[v,`${Math.round(v*100)}%`]));
             this.selectSetting(page,'控制面板背景','bgTrans',[[false,'半透明'],[true,'透明']]);
+            this.selectSetting(page,'觸控操作時面板淡化','touchAutoFade',[[true,'開啟（25%）'],[false,'關閉']]);
             this.selectSetting(page,'賽車操作時淡化','racingAutoFade',[[true,'開啟（25%）'],[false,'關閉']]);
-            this.selectSetting(page,'左右分離','splitMode',[[false,'合併'],[true,'分離']]);
+            // 舊 splitMode 欄位保留以讀取備份，介面與渲染已停用。
             this.selectSetting(page,'極簡展示 HUD','showViewer',[[false,'隱藏（實體操作時自動顯示）'],[true,'顯示']]);
             this.selectSetting(page,'展示 HUD 大小','viewerScale',[.6,.8,1,1.2].map(v=>[v,`${Math.round(v*100)}%`]),()=>this.app.viewer?.resize());
             const row=el('div','row');const key=el('select');key.setAttribute('aria-label','自動按鍵');
@@ -480,15 +741,39 @@
         macroPage() {
             const page=el('div');const slotsRow=el('div','slots');this.macroSlots=[];
             for(let s=1;s<=6;s++){const b=button(String(s),()=>{this.app.macro.select(s);this.refresh();});this.macroSlots.push(b);slotsRow.append(b);}
-            const row=el('div','row');
-            row.append(button('● 錄製',()=>{this.app.stopAll();this.app.macro.record();this.refresh();}),
-                button('■ 停止',()=>{this.app.macro.stop();this.refresh();}),
-                button('▶ 播放',()=>this.app.playMacro(false)),button('↻ 循環',()=>this.app.playMacro(true)),
-                button('清除',()=>{if(confirm('清除此巨集槽位？')){this.app.macro.clear();this.refresh();}},'danger'));
+            const style=el('style');style.textContent=`
+                .macro-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0}
+                .macro-action{display:flex;align-items:center;justify-content:center;gap:9px;min-height:46px;font-size:13px;padding:8px}
+                .macro-action svg{width:24px;height:24px;flex:none;pointer-events:none}
+                .macro-action.record svg{color:#ff6868}.macro-action.play svg{color:#57e5a1}.macro-action.loop svg{color:#71baff}.macro-action.stop svg{color:#f4c571}
+                .record-source{display:flex;gap:7px;flex-wrap:wrap;margin:6px 0}.record-source button{min-height:38px;flex:1;font-size:12px}
+                .record-source-state{overflow-wrap:anywhere;margin-bottom:8px}
+            `;page.append(style);
+            const sourceRow=el('div','record-source');sourceRow.setAttribute('role','group');sourceRow.setAttribute('aria-label','錄製來源');this.recordSourceButtons={};
+            for(const [source,label] of [['virtual','虛擬操作'],['physical','實體手把']]){
+                const b=button(label,()=>{if(this.app.macro.recording)return;const old=this.p.macroRecordSource;this.p.macroRecordSource=source;
+                    if(!this.config.save()){this.p.macroRecordSource=old;this.app.notice('錄製來源儲存失敗，已恢復原設定。');}this.refreshStatus();});
+                this.recordSourceButtons[source]=b;sourceRow.append(b);
+            }
+            this.recordSourceState=el('div','meta record-source-state');this.recordSourceState.setAttribute('role','status');
+            const action=(kind,label,fn)=>{
+                const b=button('',fn,`macro-action ${kind}`),icon=document.createElementNS('http://www.w3.org/2000/svg','svg');
+                icon.setAttribute('viewBox','0 0 24 24');icon.setAttribute('aria-hidden','true');
+                const shapes={record:'<circle cx="12" cy="12" r="8" fill="currentColor"/>',play:'<path d="M6 3L21 12L6 21Z" fill="currentColor"/>',
+                    loop:'<path d="M20 10A8 8 0 0 0 6 5M4 14A8 8 0 0 0 18 19M6 1v5h5M18 23v-5h-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>',
+                    stop:'<rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor"/>'};
+                icon.innerHTML=shapes[kind];b.append(icon,el('span','',label));return b;
+            };
+            const row=el('div','macro-actions');this.recordButton=action('record','錄製',()=>this.app.startRecording());
+            this.stopButton=action('stop','停止',()=>{this.app.macro.stop();this.refresh();});
+            this.playButton=action('play','播放',()=>this.app.playMacro(false));this.loopButton=action('loop','循環播放',()=>this.app.playMacro(true));
+            row.append(this.recordButton,this.playButton,this.loopButton,this.stopButton);
+            const clearRow=el('div','row');clearRow.append(button('清除',()=>{if(confirm('清除此巨集槽位？')){this.app.macro.clear();this.refresh();}},'danger'));
             const nameRow=el('label','setting');nameRow.append(el('span','','巨集名稱'));this.macroName=el('input');this.macroName.type='text';this.macroName.maxLength=60;
             this.macroName.onchange=()=>{if(this.macroBusy())return;const macro=this.p.macros[this.app.macro.slot],old=macro.name;macro.name=this.macroName.value.trim();if(!this.config.save()){macro.name=old;this.backupMessage.textContent='名稱儲存失敗。';}this.refreshStatus();};nameRow.append(this.macroName);
             this.macroStatus=el('div','meta');
-            page.append(slotsRow,nameRow,row,this.macroStatus,el('div','hint','第一次操作才開始計時；按下停止前的等待也會保存。手動遊戲輸入會停止播放。'),this.backupPage());
+            page.append(slotsRow,nameRow,el('div','meta','錄製來源'),sourceRow,this.recordSourceState,row,clearRow,this.macroStatus,
+                el('div','hint','第一次操作才開始計時；按下停止前的等待也會保存。實體錄製只讀取開始時選定的手把，保留按鍵、搖桿與 LT／RT 深度；播放時套用目前映射與曲線。'),this.backupPage());
             return page;
         }
         macroBusy() {return this.app.macro.playing||this.app.macro.recording;}
@@ -548,6 +833,9 @@
         }
         layoutPage() {
             const page=el('div');const slotRow=el('div','slots');this.layoutSlots=[];
+            const styles=el('div','row');styles.setAttribute('role','group');styles.setAttribute('aria-label','操作佈局');this.layoutStyleButtons={};
+            for(const [value,label] of [['panel','標準面板'],['touch','觸控佈局']]){const b=button(label,()=>this.app.changeControlStyle(value));this.layoutStyleButtons[value]=b;styles.append(b);}
+            page.append(styles,el('div','hint','面板與觸控各自保存六組位置，切換不會覆蓋另一種佈局。賽車維持原本的操作區。'));
             for(let s=1;s<=6;s++){const b=button(String(s),()=>{this.app.pointers.cancelAll();this.p.layoutSlot=s;this.app.layout.apply();this.config.save();this.refresh();});this.layoutSlots.push(b);slotRow.append(b);}
             this.editBtn=button('開始編輯',()=>{
                 if(this.p.gameMode==='racing'){this.app.notice('賽車模式不支援佈局編輯，請先切回標準模式。');return;}
@@ -562,14 +850,15 @@
             return page;
         }
         openTab(tab) {if(this.app.layout.editing&&tab!=='layout'){this.app.pointers.cancelAll();this.app.layout.editing=false;}
-            this.tab=tab;if(tab)this.collapsed=false;this.refresh();}
+            this.tab=tab;if(tab)this.collapsed=false;this.refresh();
+            if(tab==='diagnostics'){this.app.override=false;this.app.updateVisibility();}}
         setMode(id,mode) {this.app.manualStart();this.app.auto.set(id,mode);this.refresh();}
         createKey(id,width=44,height=32) {
             const node=el('button','padkey',LABELS[id]);node.type='button';node.dataset.id=id;node.dataset.mode='none';
             node.style.width=`${width}px`;node.style.height=`${height}px`;node.title=`${LABELS[id]}：右鍵切換連發／鎖定`;
             this.app.layout.register(String(id),node);this.buttons.push({id,node});
             this.app.pointers.bind(node,e=>{
-                if(this.app.layout.editing) return this.app.layout.drag(String(id),e,this.effectiveScale);
+                if(this.app.layout.editing) return this.app.layout.drag(String(id),e,this.app.touch?.active?this.app.touch.scale:this.effectiveScale);
                 this.app.manualStart();const source=`manual:${e.pointerId}`;this.app.input.set(source,'btn',id,1);
                 const combo=this.p.comboTaps&&this.p.gameMode==='standard';let taps=this.tapStates.get(id);
                 if(!taps){taps={count:0,last:-Infinity,due:null};this.tapStates.set(id,taps);}
@@ -581,7 +870,10 @@
                 }};
             });
             node.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation();
-                if(!this.app.layout.editing&&this.p.gameMode==='standard'){this.app.manualStart();this.app.auto.cycle(id);this.refresh();}});
+                if(!this.app.layout.editing&&this.p.gameMode==='standard'){
+                    this.tapStates.delete(id);
+                    this.setMode(id,{none:'interval',interval:'hold',hold:'none'}[this.app.auto.mode(id)]);
+                }});
             return node;
         }
         createStick(axis) {
@@ -590,7 +882,7 @@
             this.app.layout.register(`stick_${axis}`,base);this.sticks.push({axis,node:base,knob});
             let active=false;
             this.app.pointers.bind(base,e=>{
-                if(this.app.layout.editing)return this.app.layout.drag(`stick_${axis}`,e,this.effectiveScale);
+                if(this.app.layout.editing)return this.app.layout.drag(`stick_${axis}`,e,this.app.touch?.active?this.app.touch.scale:this.effectiveScale);
                 if(active)return null;active=true;this.app.manualStart();const source=`manual:${e.pointerId}`;
                 const rect=base.getBoundingClientRect();const scale=rect.width/base.offsetWidth;
                 const radius=(base.clientWidth-knob.offsetWidth)/2*scale;
@@ -615,6 +907,7 @@
             this.controls.append(top,row);
         }
         tick(now,state) {
+            this.refreshRecordingControls();
             for(const [id,t] of this.tapStates)if(t.due!==null&&now>=t.due){t.due=null;
                 if(this.p.comboTaps&&this.p.gameMode==='standard'&&!this.app.layout.editing){const mode=t.count===2?'interval':'hold';this.setMode(id,this.app.auto.mode(id)===mode?'none':mode);}t.count=0;}
             for(const {id,node} of this.buttons){node.classList.toggle('active',state.buttons[id]>0.05);
@@ -623,7 +916,7 @@
                 styleValue(knob,'transform',`translate(${state.axes[axis]*radius}px,${state.axes[axis+1]*radius}px)`);
                 node.classList.toggle('active',Math.hypot(state.axes[axis],state.axes[axis+1])>0.15);}
             const m=this.app.macro;
-            const msg=m.recording?(m.started===null?'等待第一次操作…':`● 錄製中 ${((now-m.started)/1000).toFixed(1)} 秒`):m.playing?`${m.loop?'↻ 循環':'▶ 播放'} 槽位 ${m.slot}`:
+            const msg=m.recording?(m.started===null?'錄製已準備 · 等待第一次操作…':`錄製中 · ${m.recordSource==='physical'?'實體手把':'虛擬操作'} · ${((now-m.started)/1000).toFixed(1)} 秒`):m.playing?`${m.loop?'循環播放':'播放中'} · 槽位 ${m.slot}`:
                 `槽位 ${m.slot}：${this.p.macros[m.slot].events.length} 筆 / ${(this.p.macros[m.slot].duration/1000).toFixed(1)} 秒`;
             if(this.macroStatus.textContent!==msg)this.macroStatus.textContent=msg;
             const sig=JSON.stringify([...this.app.auto.modes].map(([id,v])=>[id,v.mode]))+this.app.racing.afk+m.playing+m.recording+m.slot;
@@ -633,6 +926,7 @@
             this.status.replaceChildren();for(const [id,m] of this.app.auto.modes)this.status.append(button(`${LABELS[id]} ${m.mode==='hold'?'鎖定':'連發'} ×`,()=>this.setMode(id,'none')));
             if(this.app.racing.afk)this.status.append(button('AFK ×',()=>{this.app.racing.stop();this.refresh();}));
             const m=this.app.macro;if(m.playing||m.recording)this.status.append(button(`巨集 ${m.slot} ${m.recording?'錄製':'播放'} ■`,()=>{m.stop();this.refresh();}));
+            this.refreshRecordingControls();
             this.macroSlots.forEach((b,i)=>{const data=this.p.macros[i+1];b.classList.toggle('on',m.slot===i+1);b.textContent=`${i+1}${data.events.length?' •':''}${data.name?' '+data.name:''}`;b.title=data.name||`槽位 ${i+1}`;});
             this.macroName.disabled=this.importBtn.disabled=!!this.macroBusy();
             this.exportOne.disabled=this.exportAll.disabled=!!m.recording;
@@ -640,21 +934,37 @@
             if(this.importApply){this.importApply.disabled=this.importSource.disabled=!!this.macroBusy();this.importTarget.disabled=this.macroBusy()||this.importSource.value==='all';}
             this.afkBtn.classList.toggle('on',this.app.racing.afk);this.afkBtn.textContent=this.app.racing.afk?'停止 AFK 擺頭':'啟動 AFK 擺頭';
         }
+        refreshRecordingControls() {
+            const m=this.app.macro,physical=this.p.macroRecordSource==='physical',monitor=this.app.physical;
+            for(const [source,b] of Object.entries(this.recordSourceButtons)){b.disabled=m.recording;b.classList.toggle('on',source===this.p.macroRecordSource);b.setAttribute('aria-pressed',String(source===this.p.macroRecordSource));}
+            this.recordButton.disabled=m.recording||this.app.layout.editing||(physical&&!monitor.connected);
+            this.playButton.disabled=this.loopButton.disabled=m.recording;this.stopButton.disabled=!m.recording&&!m.playing;
+            this.recordSourceState.textContent=m.recording?`錄製中 · ${m.recordSource==='physical'?'實體手把（來源已固定）':'虛擬操作'}`:
+                physical?(monitor.connected?`已連接：${monitor.id}`:'未連接實體手把 · 請連接並按一下手把按鍵'):'目前來源：畫面上的虛擬操作';
+        }
         refresh() {
+            this.app.touch?.sync();
             this.root.classList.toggle('help-off',!this.p.showHelp);this.app.racingView?.area.classList.toggle('help-off',!this.p.showHelp);
             this.helpBtn.classList.toggle('on',this.p.showHelp);this.helpBtn.setAttribute('aria-pressed',String(this.p.showHelp));this.helpBtn.title=this.p.showHelp?'隱藏操作說明':'顯示操作說明';
             this.macroQuick.classList.toggle('on',this.tab==='macro'&&!this.collapsed);this.macroQuick.setAttribute('aria-expanded',String(this.tab==='macro'&&!this.collapsed));
-            const racing=this.p.gameMode==='racing';this.root.classList.toggle('compact',racing);this.root.classList.toggle('split',this.p.splitMode&&!racing);
+            this.toolBtn.classList.toggle('on',this.tab==='settings'&&!this.collapsed);this.toolBtn.setAttribute('aria-expanded',String(this.tab==='settings'&&!this.collapsed));
+            const racing=this.p.gameMode==='racing';this.root.classList.toggle('compact',racing);
+            const touch=this.p.controlStyle==='touch'||racing;
+            this.root.classList.toggle('touch-mode',touch);
+            this.styleQuick.textContent=touch?'觸控':'面板';this.styleQuick.disabled=racing;this.styleQuick.setAttribute('aria-pressed',String(touch));
+            for(const [style,b] of Object.entries(this.layoutStyleButtons)){b.disabled=racing;b.classList.toggle('on',this.p.controlStyle===style);b.setAttribute('aria-pressed',String(this.p.controlStyle===style));}
             this.root.classList.toggle('transparent',this.p.bgTrans);this.root.classList.toggle('editing',this.app.layout.editing);
-            const width=this.collapsed?350:this.p.splitMode&&!racing?Math.max(550,(window.innerWidth-30)/this.p.uiScale):550;
+            const width=this.collapsed?350:touch&&!this.tab?400:550;
             this.effectiveScale=Math.min(this.p.uiScale,(window.innerWidth-16)/width);
+            this.root.classList.toggle('compact-toolbar',width*this.effectiveScale<480);
             this.root.style.transform=`scale(${this.effectiveScale})`;
             this.root.style.width=`${width}px`;
+            if(racing){this.root.style.left=`${Math.max(8,(window.innerWidth-width*this.effectiveScale)/2)}px`;this.root.style.top=window.innerWidth<700?'66px':'15px';}
             this.modeBtn.textContent=racing?'賽車':'標準';this.collapseBtn.textContent=this.collapsed?'展開':'收合';
-            this.controls.hidden=this.collapsed;this.help.hidden=this.collapsed;this.raceHint.hidden=this.collapsed||!racing;
+            this.controls.hidden=this.collapsed||touch;this.help.hidden=this.collapsed;this.raceHint.hidden=this.collapsed||!racing;
             this.tabs.hidden=this.tools.hidden=this.collapsed||!this.tab;
             for(const [key,page] of Object.entries(this.pages)){page.hidden=key!==this.tab;this.tabButtons[key].classList.toggle('on',key===this.tab);}
-            this.layoutSlots.forEach((b,i)=>b.classList.toggle('on',this.p.layoutSlot===i+1));
+            this.layoutSlots.forEach((b,i)=>{b.classList.toggle('on',this.p.layoutSlot===i+1);b.textContent=`${i+1}${this.p.layoutNames[i+1]?' '+this.p.layoutNames[i+1]:''}`;b.title=this.p.layoutNames[i+1]||`佈局 ${i+1}`;});
             this.editBtn.textContent=this.app.layout.editing?'完成編輯':'開始編輯';this.editBtn.classList.toggle('on',this.app.layout.editing);
             this.groupBtn.textContent=this.app.layout.group?'群組移動':'單顆移動';this.snapBtn.textContent=this.app.layout.snap?'磁吸 10px':'自由移動';
             this.groupBtn.classList.toggle('on',this.app.layout.group);this.snapBtn.classList.toggle('on',this.app.layout.snap);
@@ -662,9 +972,10 @@
             this.refreshStatus();
             if(!this.tools.hidden){
                 const otherHeight=this.root.offsetHeight-this.tools.offsetHeight;
-                this.tools.style.maxHeight=`${Math.max(60,(window.innerHeight-16)/this.effectiveScale-otherHeight)}px`;
+                const available=touch?Math.max(100,window.innerHeight-(this.app.touch?.renderedHeight||0)-44):window.innerHeight-16;
+                this.tools.style.maxHeight=`${Math.max(touch?30:60,available/this.effectiveScale-otherHeight)}px`;
             }
-            this.app.clampElement(this.root);
+            this.app.clampElement(this.root);this.app.touch?.positionUtility();
         }
         cancelTaps() {this.tapStates.clear();}
     }
@@ -715,6 +1026,228 @@
         }
     }
 
+    class AdvancedTools {
+        constructor(app) {
+            this.app=app;this.panel=app.panel;this.p=app.config.prefs;this.urls=new Set();this.fileToken=0;this.lastTick=0;
+            const style=el('style');style.textContent=`
+            .v15-card{margin-top:10px;padding:9px;border:1px solid var(--line);border-radius:10px;font-size:11px}.v15-card h3{font-size:12px;margin:0 0 8px;color:var(--green)}
+            .v15-card input,.v15-card textarea{background:#182634;color:inherit;border:1px solid var(--line);border-radius:5px;padding:5px;font:inherit;user-select:text}
+            .v15-card input[type=number]{width:80px}.v15-card input[type=checkbox]{width:auto}.v15-card select{max-width:180px}
+            .v15-table{width:100%;border-collapse:collapse;font-size:10px}.v15-table th,.v15-table td{text-align:left;padding:4px;border-bottom:1px solid var(--line)}.v15-table input[type=number]{width:65px}.v15-table select{max-width:80px;padding:4px}
+            .v15-scroll{overflow:auto;max-height:260px}.v15-message{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;margin:6px 0}.v15-message:empty{display:none}
+            .quickbar{position:fixed;right:8px;top:35%;z-index:6;pointer-events:auto;background:#111c29e8;border:1px solid var(--line);border-radius:12px;padding:6px;max-width:155px;max-height:65vh;overflow:auto}
+            .quickbar button{display:block;width:100%;margin:3px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.v15-diagnostics{white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.6 monospace;user-select:text}
+            `;app.shadow.append(style);
+            this.addPage('input','輸入',this.inputPage());this.addPage('shortcuts','快捷／保護',this.shortcutPage());this.addPage('backup','備份',this.backupPage());this.addPage('diagnostics','診斷',this.diagnosticPage());
+            this.panel.pages.macro.append(this.editorPage());this.panel.pages.layout.append(this.layoutPage());
+            this.touchSettings=this.touchSettingsPage();this.panel.pages.layout.append(this.touchSettings);
+            this.quickbar=el('aside','quickbar');this.quickbar.setAttribute('aria-label','巨集快捷列');
+            this.quickToggle=button('巨集 ▸',()=>{this.p.quickbarCollapsed=!this.p.quickbarCollapsed;app.config.save();this.syncQuickbar();});this.quickItems=el('div');this.quickButtons=[];
+            for(let s=1;s<=6;s++){const b=button(`${s}`,()=>app.playMacro(false,s));this.quickButtons.push(b);this.quickItems.append(b);}
+            this.quickItems.append(button('■ 全停',()=>app.stopAll(),'danger'));this.quickbar.append(this.quickToggle,this.quickItems);app.shadow.append(this.quickbar);
+            app.signal.addEventListener('abort',()=>{this.fileToken++;for(const url of this.urls)URL.revokeObjectURL(url);this.urls.clear();},{once:true});
+            this.panel.refresh();this.syncQuickbar();
+        }
+        addPage(key,label,page) {const b=button(label,()=>this.panel.openTab(key));this.panel.tabButtons[key]=b;this.panel.tabs.append(b);this.panel.pages[key]=page;this.panel.tools.append(page);}
+        card(title,parent) {const c=el('section','v15-card');c.append(el('h3','',title));parent?.append(c);return c;}
+        message(parent) {const n=el('div','v15-message');n.setAttribute('role','status');parent.append(n);return n;}
+        busy() {return this.app.macro.playing||this.app.macro.recording;}
+        requireIdle() {if(this.busy()||this.app.layout.editing)throw Error('請先停止巨集並完成佈局編輯，再進行此操作。');}
+        attempt(message,fn) {try{if(fn()===false){message.textContent='已取消。';return false;}message.textContent='已儲存。';this.panel.refresh();this.syncQuickbar();return true;}catch(e){message.textContent=e.message;return false;}}
+        saveChange(fn) {
+            const old=clone(this.p);this.app.stopAll();
+            try{fn();if(!this.app.config.save())throw Error('儲存失敗，已恢復原設定。');}
+            catch(e){Object.assign(this.p,old);throw e;}
+        }
+        select(parent,label,values,current,onChange) {
+            const row=el('label','setting');row.append(el('span','',label));const s=el('select');s.setAttribute('aria-label',label);
+            values.forEach(([value,title])=>{const o=el('option','',title);o.value=String(value);s.append(o);});s.value=String(current);
+            let previous=s.value;s.onchange=()=>{if(onChange(s.value)===false)s.value=previous;else previous=s.value;};row.append(s);parent.append(row);return s;
+        }
+        number(parent,label,value,min,max,step,onChange) {
+            const row=el('label','setting');row.append(el('span','',label));const n=el('input');n.type='number';n.required=true;n.value=String(value);n.min=min;n.max=max;n.step=step;n.setAttribute('aria-label',label);
+            let previous=n.value;n.onchange=()=>{if(n.value===''||!n.checkValidity()){this.app.notice(`${label}：請輸入 ${min}～${max} 的有效數值。`);return;}if(onChange(Number(n.value))===false)n.value=previous;else previous=n.value;};row.append(n);parent.append(row);return n;
+        }
+        check(parent,label,value,onChange) {const row=el('label','setting'),n=el('input');n.type='checkbox';n.checked=value;n.setAttribute('aria-label',label);let previous=n.checked;n.onchange=()=>{if(onChange(n.checked)===false)n.checked=previous;else previous=n.checked;};row.append(el('span','',label),n);parent.append(row);return n;}
+        inputPage() {
+            const page=el('div');this.tuningSide=0;const c=this.card('搖桿曲線與死區',page);this.tuningBody=el('div');this.tuningMessage=this.message(c);
+            this.select(c,'調整搖桿',[[0,'LS 左搖桿'],[1,'RS 右搖桿']],0,v=>{this.tuningSide=Number(v);this.renderTuning();});c.append(this.tuningBody);this.renderTuning();
+            const map=this.card('按鍵重新映射',page);this.mappingMessage=this.message(map);
+            this.check(map,'實體手把也套用映射與曲線',this.p.physicalMapping,on=>this.attempt(this.mappingMessage,()=>this.saveChange(()=>this.p.physicalMapping=on)));
+            map.append(el('div','hint','預設只改虛擬輸出。錄製保存原始動作，播放時才套用目前設定。實體映射直接修改回傳資料，不額外建立第二份手把輸入。'));
+            const rows=el('div','v15-scroll');this.mapSelects=[];
+            LABELS.forEach((name,id)=>this.mapSelects.push(this.select(rows,`${name} →`,LABELS.map((title,value)=>[value,title]),this.p.buttonMap[id],v=>this.attempt(this.mappingMessage,()=>this.saveChange(()=>this.p.buttonMap[id]=Number(v))))));
+            map.append(rows,button('還原按鍵映射',()=>this.attempt(this.mappingMessage,()=>{this.requireIdle();this.saveChange(()=>this.p.buttonMap=LABELS.map((_,i)=>i));this.mapSelects.forEach((s,i)=>s.value=i);})));return page;
+        }
+        renderTuning() {
+            const body=this.tuningBody;body.replaceChildren();const t=this.p.axisTuning[this.tuningSide];
+            const presets={standard:{deadzone:0,sensitivity:1,max:1,curve:'linear'},aim:{deadzone:.08,sensitivity:.8,max:1,curve:'soft'},racing:{deadzone:.04,sensitivity:1,max:1,curve:'soft'},fast:{deadzone:.08,sensitivity:1.2,max:1,curve:'fast'}};
+            this.select(body,'常用預設',[['custom','手動調整'],['standard','標準（相容舊版）'],['aim','細膩瞄準'],['racing','柔和轉向'],['fast','快速反應']],'custom',v=>{if(v==='custom')return;this.attempt(this.tuningMessage,()=>this.saveChange(()=>Object.assign(this.p.axisTuning[this.tuningSide],presets[v])));this.renderTuning();});
+            const change=(key,value)=>this.attempt(this.tuningMessage,()=>this.saveChange(()=>this.p.axisTuning[this.tuningSide][key]=value));
+            this.number(body,'死區（0～0.45）',t.deadzone,0,.45,.01,v=>change('deadzone',v));this.number(body,'靈敏度（0.2～3）',t.sensitivity,.2,3,.05,v=>change('sensitivity',v));this.number(body,'最大輸出（0.1～1）',t.max,.1,1,.05,v=>change('max',v));
+            this.select(body,'曲線',[['linear','線性'],['soft','柔和'],['fast','快速']],t.curve,v=>change('curve',v));this.check(body,'反轉 X 軸',t.invertX,v=>change('invertX',v));this.check(body,'反轉 Y 軸',t.invertY,v=>change('invertY',v));
+            body.append(el('div','hint','死區使用圓形計算，預設參數保留舊版操作感。修改輸入設定時會停止目前自動操作。'));
+        }
+        shortcutPage() {
+            const page=el('div'),c=this.card('巨集快捷啟動',page);this.shortcutMessage=this.message(c);
+            const toggle=(key,on)=>this.attempt(this.shortcutMessage,()=>this.saveChange(()=>this.p[key]=on));
+            this.check(c,'鍵盤巨集快捷鍵',this.p.keyboardMacros,v=>toggle('keyboardMacros',v));this.check(c,'手把組合鍵巨集',this.p.comboMacros,v=>toggle('comboMacros',v));this.check(c,'顯示側邊巨集快捷列',this.p.showQuickbar,v=>toggle('showQuickbar',v));
+            c.append(el('div','hint','鍵盤與組合鍵預設關閉。組合鍵不會吃掉原遊戲輸入；有衝突時請關閉。按住只啟動一次，放開後才能再觸發；輸入文字時不啟動鍵盤巨集。'));
+            const keyValues=[...Array.from({length:10},(_,i)=>`F${i+3}`),...Array.from({length:26},(_,i)=>`Key${String.fromCharCode(65+i)}`),...Array.from({length:10},(_,i)=>`Digit${i}`)].map(v=>[v,v]);
+            for(let i=0;i<6;i++){
+                const group=this.card(`巨集 ${i+1}`,c);this.select(group,`巨集 ${i+1} 鍵盤`,keyValues,this.p.macroKeys[i],v=>this.attempt(this.shortcutMessage,()=>{
+                    if(this.p.macroKeys.some((k,j)=>j!==i&&k===v)||v===this.p.emergencyKey)throw Error('快捷鍵不能重複或與急停相同。');this.saveChange(()=>this.p.macroKeys[i]=v);
+                }));
+                for(let j=0;j<2;j++)this.select(group,`巨集 ${i+1} 組合鍵 ${j+1}`,LABELS.map((v,k)=>[k,v]),this.p.macroCombos[i][j],v=>this.attempt(this.shortcutMessage,()=>{
+                    const combo=[...this.p.macroCombos[i]];combo[j]=Number(v);if(combo[0]===combo[1])throw Error('組合键需選兩個不同按鍵。');
+                    if(this.p.macroCombos.some((k,n)=>n!==i&&[...k].sort().join() === [...combo].sort().join()))throw Error('組合鍵已用於其他巨集。');
+                    if(combo.includes(10)&&combo.includes(11))throw Error('L3＋R3 保留給面板快捷操作。');this.saveChange(()=>this.p.macroCombos[i]=combo);
+                }));
+            }
+            const safety=this.card('急停與輸入保護',page);this.check(safety,'啟用急停快捷鍵',this.p.emergencyEnabled,v=>toggle('emergencyEnabled',v));
+            this.select(safety,'急停鍵',keyValues,this.p.emergencyKey,v=>this.attempt(this.shortcutMessage,()=>{if(this.p.macroKeys.includes(v))throw Error('急停不可與巨集快捷鍵相同。');this.saveChange(()=>this.p.emergencyKey=v);}));
+            this.number(safety,'手動長按上限（秒，0＝關閉）',this.p.holdTimeout,0,600,1,v=>this.attempt(this.shortcutMessage,()=>this.saveChange(()=>this.p.holdTimeout=v)));
+            this.number(safety,'巨集播放上限（秒，0＝關閉）',this.p.playbackLimit,0,3600,1,v=>this.attempt(this.shortcutMessage,()=>this.saveChange(()=>this.p.playbackLimit=v)));
+            safety.append(el('div','hint','長按保護只限制手動觸控按鍵／油門，不限制刻意鎖定或連發。失焦、隱藏分頁與離線時會全停；全螢幕切換會取消觸控操作。'));return page;
+        }
+        editorPage() {
+            const c=this.card('巨集時間軸編輯器');this.editorMessage=this.message(c);
+            c.append(button('開啟目前槽位草稿',()=>{try{this.requireIdle();if(this.draft&&!confirm('捨棄目前草稿並重新載入？'))return;this.editSlot=this.app.macro.slot;this.draft=clone(this.p.macros[this.editSlot]);this.editPage=0;this.renderEditor();this.editorMessage.textContent=`正在編輯槽位 ${this.editSlot}，尚未取代原巨集。`;}catch(e){this.editorMessage.textContent=e.message;}}));
+            this.editorBody=el('div');c.append(this.editorBody);
+            this.speedSelect=this.select(c,'播放速度',[[.25,'0.25×'],[.5,'0.5×'],[.75,'0.75×'],[1,'1×'],[1.5,'1.5×'],[2,'2×'],[3,'3×']],this.p.macroSpeed,v=>this.attempt(this.editorMessage,()=>this.saveChange(()=>this.p.macroSpeed=Number(v))));return c;
+        }
+        renderEditor() {
+            const body=this.editorBody;body.replaceChildren();if(!this.draft)return;
+            const d=this.draft,info=el('div','meta',`草稿：槽位 ${this.editSlot} · ${d.events.length} 筆`);body.append(info);
+            const name=el('input');name.type='text';name.maxLength=60;name.value=d.name;name.setAttribute('aria-label','草稿名稱');name.onchange=()=>d.name=name.value.trim();body.append(name);
+            this.number(body,'總長度（秒，包含結尾等待）',d.duration/1000,0,86400,.001,v=>d.duration=v*1000);
+            const scroll=el('div','v15-scroll'),table=el('table','v15-table'),head=el('tr');['時間（秒）','動作','按鍵／軸','數值',''].forEach(t=>head.append(el('th','',t)));table.append(head);
+            const pageSize=40,pages=Math.max(1,Math.ceil(d.events.length/pageSize));this.editPage=clamp(this.editPage,0,pages-1);
+            for(let i=this.editPage*pageSize;i<Math.min(d.events.length,(this.editPage+1)*pageSize);i++){
+                const event=d.events[i],tr=el('tr');const cell=node=>{const td=el('td');td.append(node);tr.append(td);};
+                const time=el('input');time.type='number';time.required=true;time.min=0;time.max=86400;time.step=.001;time.value=(event.t/1000).toFixed(3);time.setAttribute('aria-label',`步驟 ${i+1} 時間`);
+                time.onchange=()=>{if(time.value===''||!time.checkValidity()){this.editorMessage.textContent='時間需為有效的非負數。';return;}event.t=Number(time.value)*1000;};cell(time);
+                const type=el('select');for(const [value,label] of [['btn','按鍵'],['axis','搖桿']]){const o=el('option','',label);o.value=value;type.append(o);}type.value=event.type;type.setAttribute('aria-label',`步驟 ${i+1} 類型`);
+                type.onchange=()=>{event.type=type.value;event.id=0;event.val=0;this.renderEditor();};cell(type);
+                const id=el('select');(event.type==='btn'?LABELS:['LS X','LS Y','RS X','RS Y']).forEach((label,value)=>{const o=el('option','',label);o.value=value;id.append(o);});id.value=event.id;id.onchange=()=>event.id=Number(id.value);id.setAttribute('aria-label',`步驟 ${i+1} 按鍵`);cell(id);
+                const value=el('input');value.type='number';value.required=true;value.min=event.type==='btn'?0:-1;value.max=1;value.step='any';value.value=event.val;value.setAttribute('aria-label',`步驟 ${i+1} 數值`);
+                value.onchange=()=>{if(value.value===''||!value.checkValidity()){this.editorMessage.textContent='數值需在按鍵 0～1 或搖桿 -1～1 範圍內。';return;}event.val=Number(value.value);};cell(value);
+                cell(button('刪',()=>{d.events.splice(i,1);this.renderEditor();}));table.append(tr);
+            }
+            scroll.append(table);body.append(scroll);const nav=el('div','row');nav.append(button('上一頁',()=>{this.editPage--;this.renderEditor();}),el('span','meta',`${this.editPage+1} / ${pages}`),button('下一頁',()=>{this.editPage++;this.renderEditor();}));body.append(nav);
+            const row=el('div','row');row.append(button('＋ 插入動作',()=>{if(d.events.length>=MacroBackup.MAX_EVENTS){this.editorMessage.textContent='已達事件上限。';return;}d.events.push({t:d.duration,type:'btn',id:0,val:0});this.editPage=Math.floor((d.events.length-1)/pageSize);this.renderEditor();}),button('依時間排序',()=>{d.events.sort((a,b)=>a.t-b.t);this.renderEditor();}));
+            const shift=el('input');shift.type='number';shift.value=0;shift.step=.001;shift.setAttribute('aria-label','整段平移秒數');row.append(shift,button('整段平移',()=>{const delta=Number(shift.value)*1000;if(shift.value===''||!Number.isFinite(delta)||d.duration+delta<0||d.events.some(e=>e.t+delta<0)){this.editorMessage.textContent='平移後不可產生負時間。';return;}d.events.forEach(e=>e.t+=delta);d.duration+=delta;this.renderEditor();}));body.append(row);
+            body.append(el('div','hint','0＝放開；按鍵／LT／RT 數值 0～1，搖桿 -1～1。保留同時動作的原順序。總長度不得早於最後一步；過長清單分頁顯示。'));
+            const actions=el('div','row');actions.append(button('儲存並取代原巨集',()=>this.attempt(this.editorMessage,()=>{
+                this.requireIdle();if(body.querySelector('input:invalid'))throw Error('請先修正草稿的無效數值。');
+                MacroTimeline.normalize(d);if(!confirm(`以草稿取代槽位 ${this.editSlot} 的巨集？`))return false;MacroTimeline.save(this.app.config,this.editSlot,d);this.draft=null;this.renderEditor();
+            })),button('捨棄草稿',()=>{if(confirm('捨棄未儲存的草稿？')){this.draft=null;this.renderEditor();this.editorMessage.textContent='草稿已捨棄，原巨集不變。';}}));body.append(actions);
+        }
+        layoutPage() {
+            const c=this.card('佈局管理');this.layoutMessage=this.message(c);this.layoutName=el('input');this.layoutName.type='text';this.layoutName.maxLength=60;this.layoutName.setAttribute('aria-label','佈局名稱');this.layoutName.value=this.p.layoutNames[this.p.layoutSlot];
+            this.layoutName.onchange=()=>this.attempt(this.layoutMessage,()=>this.saveChange(()=>this.p.layoutNames[this.p.layoutSlot]=this.layoutName.value.trim()));c.append(this.layoutName);
+            this.layoutTarget=this.select(c,'目的佈局',Array.from({length:6},(_,i)=>[i+1,`佈局 ${i+1}`]),1,()=>{});
+            const row=el('div','row');row.append(button('複製到目的',()=>this.layoutOperation('copy')),button('交換兩組',()=>this.layoutOperation('swap')));c.append(row);
+            this.layoutItem=this.select(c,'還原單一元件',[...this.app.layout.items.keys()].map(id=>[id,id.startsWith('stick_')?(id==='stick_0'?'LS':'RS'):LABELS[Number(id)]]),'0',()=>{});
+            c.append(button('還原此元件',()=>this.attempt(this.layoutMessage,()=>{this.requireIdle();if(!confirm('還原目前模式的此元件位置？'))return false;this.saveChange(()=>delete this.app.layout.offsets()[this.layoutItem.value]);this.app.layout.apply();})),button('匯出六組佈局',()=>this.download('xcloud-layouts.json',JSON.stringify(this.layoutDocument(),null,2),this.layoutMessage)),button('匯入佈局',()=>this.chooseFile('layouts',this.layoutMessage)));
+            return c;
+        }
+        layoutOperation(kind) {
+            this.attempt(this.layoutMessage,()=>{this.requireIdle();const from=this.p.layoutSlot,to=Number(this.layoutTarget.value);if(from===to)throw Error('請選擇不同目的佈局。');if(!confirm(`${kind==='copy'?'複製覆蓋':'交換'}佈局 ${from} 與 ${to}？`))return;
+                this.saveChange(()=>{const name=this.p.layoutNames[from];for(const collection of [this.p.layouts,this.p.touchLayouts,this.p.racingLayouts]){const layout=clone(collection[from]);if(kind==='swap')collection[from]=clone(collection[to]);collection[to]=layout;}if(kind==='swap')this.p.layoutNames[from]=this.p.layoutNames[to];this.p.layoutNames[to]=name;});this.app.layout.apply();});
+        }
+        touchSettingsPage() {
+            const c=this.card('觸控尺寸與分區透明度'),message=this.message(c);
+            const change=(key,value)=>this.attempt(message,()=>this.saveChange(()=>this.p[key]=value));
+            this.number(c,'觸控按鍵大小（倍率）',this.p.touchButtonSize,.7,1.4,.05,v=>change('touchButtonSize',v));
+            this.number(c,'觸控搖桿大小（倍率）',this.p.touchStickSize,.7,1.4,.05,v=>change('touchStickSize',v));
+            this.number(c,'按鍵觸控外擴（像素）',this.p.touchHitPadding,0,8,1,v=>change('touchHitPadding',v));
+            this.number(c,'左操作區透明度（0.2～1）',this.p.touchOpacityLeft,.2,1,.05,v=>change('touchOpacityLeft',v));
+            this.number(c,'右操作區透明度（0.2～1）',this.p.touchOpacityRight,.2,1,.05,v=>change('touchOpacityRight',v));
+            this.number(c,'輔助按鍵透明度（0.2～1）',this.p.touchOpacityUtility,.2,1,.05,v=>change('touchOpacityUtility',v));
+            c.append(el('div','hint','只影響觸控佈局。空白處仍可操作遊戲頁面；預設排列會保留觸控範圍間距。佈局編輯時顯示按鍵實際範圍，並暫時恢復清楚顯示。自訂拖曳時請避免重疊。窄畫面改為上下排列；大小超過可用空間時會自動縮放。'));
+            return c;
+        }
+        layoutDocument() {return {format:'better-xcloud-layouts',version:2,layouts:clone(this.p.layouts),racingLayouts:clone(this.p.racingLayouts),touchLayouts:clone(this.p.touchLayouts),layoutNames:clone(this.p.layoutNames)};}
+        validateLayouts(doc) {
+            if(doc?.format!=='better-xcloud-layouts'||![1,2].includes(doc.version))throw Error('不是支援的佈局備份。');
+            if(doc.version===2&&!doc.touchLayouts)throw Error('觸控佈局資料不完整。');
+            const merged=clone(this.p);merged.layouts=doc.layouts;merged.layoutNames=doc.layoutNames;
+            if(doc.touchLayouts)merged.touchLayouts=doc.touchLayouts;
+            if(doc.racingLayouts)merged.racingLayouts=doc.racingLayouts;
+            const valid=ConfigurationBackup.validate({format:'better-xcloud-config',version:1,settings:merged});return {layouts:valid.layouts,touchLayouts:valid.touchLayouts,racingLayouts:valid.racingLayouts,layoutNames:valid.layoutNames};
+        }
+        backupPage() {
+            const page=el('div'),c=this.card('完整設定備份',page);this.backupMessage=this.message(c);const row=el('div','row');
+            row.append(button('匯出完整備份',()=>{try{this.requireIdle();this.download(`xcloud-config-${VERSION}.json`,ConfigurationBackup.encode(this.app.config),this.backupMessage);}catch(e){this.backupMessage.textContent=e.message;}}),button('匯入完整備份',()=>this.chooseFile('config',this.backupMessage)));
+            c.append(row,el('div','hint','備份包含六組巨集、六組佈局、名稱、曲線、映射與介面設定。匯入只保存設定，不會自動啟動巨集／連發。'));
+            this.backupPreview=el('div','v15-card');this.backupPreview.hidden=true;c.append(this.backupPreview);
+            const update=this.card('版本與更新',page);update.append(el('div','meta',`目前版本 ${VERSION}`));this.updateMessage=this.message(update);
+            this.updateButton=button('檢查正式版更新',()=>this.checkUpdate());const releases=el('a','','開啟正式版本下載頁');releases.href='https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest';releases.target='_blank';releases.rel='noopener noreferrer';releases.style.color='var(--green)';update.append(this.updateButton,releases,el('div','hint','只追蹤正式 Release，不使用 main 測試版本。自動更新依腳本管理器設定執行；遊戲中不強制重載。'));
+            return page;
+        }
+        download(name,text,message) {
+            try{if(this.app.destroyed)return;const url=URL.createObjectURL(new Blob([text],{type:'application/json'}));this.urls.add(url);const link=el('a');link.href=url;link.download=name;this.app.shadow.append(link);link.click();link.remove();setTimeout(()=>{URL.revokeObjectURL(url);this.urls.delete(url);},30000);message.textContent='已產生備份，請確認瀏覽器下載。';}catch(e){message.textContent=e.message;}
+        }
+        chooseFile(kind,message) {
+            try{this.requireIdle();}catch(e){message.textContent=e.message;return;}
+            const token=++this.fileToken,input=el('input');input.type='file';input.accept='.json,application/json';input.hidden=true;this.app.shadow.append(input);
+            input.onchange=async()=>{
+                const file=input.files[0];input.remove();if(!file)return;
+                try{this.requireIdle();if(file.size>MacroBackup.MAX_BYTES)throw Error('檔案超過 16 MB。');const text=await file.text();if(token!==this.fileToken||this.app.destroyed)return;this.requireIdle();
+                    if(kind==='config')this.showRestore(ConfigurationBackup.parse(text),message);
+                    else{let doc;try{doc=JSON.parse(text.replace(/^\uFEFF/,''));}catch{throw Error('JSON 無法解析。');}const data=this.validateLayouts(doc);this.showRestore({...clone(this.p),...data},message,['layouts']);}
+                }catch(e){if(token===this.fileToken&&!this.app.destroyed)message.textContent=e.message;}
+            };
+            input.addEventListener('cancel',()=>input.remove(),{once:true});input.click();
+        }
+        showRestore(data,message,allowed=ConfigurationBackup.groups) {
+            this.restorePending=true;this.panel.openTab('backup');const preview=this.backupPreview;preview.replaceChildren();preview.hidden=false;
+            preview.append(el('h3','','還原預覽（尚未寫入）'));
+            for(let s=1;s<=6;s++)preview.append(el('div','meta',`巨集 ${s}：${data.macros[s].name||'未命名'}，${data.macros[s].events.length} 筆；佈局 ${s}：${data.layoutNames[s]||'未命名'}，面板 ${Object.keys(data.layouts[s]).length}／觸控 ${Object.keys(data.touchLayouts[s]).length} 個位移`));
+            const choices={};for(const [key,label] of [['macros','六組巨集'],['layouts','六組佈局與名稱'],['settings','介面／曲線／映射／快捷設定']])if(allowed.includes(key))choices[key]=this.check(preview,`還原${label}`,true,()=>{});
+            this.restoreButton=button('確認還原所選項目',()=>{try{this.requireIdle();const groups=Object.keys(choices).filter(k=>choices[k].checked);if(!groups.length)throw Error('請至少選一項。');if(!confirm(`取代目前的 ${groups.join('、')}？空槽也會覆蓋原資料。`))return;
+                this.app.stopAll();ConfigurationBackup.commit(this.app.config,data,groups);this.fileToken++;this.restorePending=false;preview.hidden=true;this.draft=null;this.renderEditor();this.app.layout.apply();this.app.viewer.resize();this.app.changeModeAfterRestore?.();this.panel.refresh();this.refreshControls();this.syncQuickbar();this.backupMessage.textContent='已還原所選資料；自動操作維持停止。';
+            }catch(e){this.backupMessage.textContent=e.message;}});preview.append(this.restoreButton,button('取消還原',()=>{this.fileToken++;this.restorePending=false;preview.hidden=true;this.backupMessage.textContent='已取消，資料沒有變更。';}));message.textContent='檔案驗證完成。';this.panel.refresh();
+        }
+        refreshControls() {
+            // 整個設定頁重新建立，確保還原之後畫面與設定一致。
+            for(const key of ['input','shortcuts']){const old=this.panel.pages[key],next=key==='input'?this.inputPage():this.shortcutPage();old.replaceWith(next);this.panel.pages[key]=next;}
+            const touch=this.touchSettingsPage();this.touchSettings.replaceWith(touch);this.touchSettings=touch;
+            this.layoutName.value=this.p.layoutNames[this.p.layoutSlot];this.speedSelect.value=String(this.p.macroSpeed);this.panel.refresh();
+        }
+        async checkUpdate() {
+            this.updateButton.disabled=true;this.updateMessage.textContent='正在查詢正式 Release…';
+            try {
+                const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);this.app.signal.addEventListener('abort',()=>controller.abort(),{once:true});let response;
+                try{response=await fetch('https://api.github.com/repos/sl721225/Better-xCloud-Gamepad/releases/latest',{signal:controller.signal,credentials:'omit',headers:{Accept:'application/vnd.github+json'}});}finally{clearTimeout(timer);}
+                if(!response.ok)throw Error(`GitHub 回應 ${response.status}，請稍後重試或開啟下載頁。`);const release=await response.json();if(this.app.destroyed)return;
+                if(release.draft||release.prerelease||!/^v?\d+\.\d+\.\d+$/.test(release.tag_name))throw Error('未找到有效的正式版本。');
+                const latest=release.tag_name.replace(/^v/,''),a=latest.split('.').map(Number),b=VERSION.split('.').map(Number);let newer=false;for(let i=0;i<3;i++){if(a[i]!==b[i]){newer=a[i]>b[i];break;}}
+                this.updateMessage.textContent=newer?`有新版本 ${latest}\n${String(release.body||'').slice(0,3000)}\n請透過腳本管理器更新，或開啟正式版本下載頁。`:`正式版為 ${latest}；目前 ${VERSION} ${latest===VERSION?'已是最新版':'比公開正式版新，尚在測試'}。`;
+            }catch(e){if(!this.app.destroyed)this.updateMessage.textContent=e.name==='AbortError'?'查詢逾時，請稍後再試。':e.message;}
+            finally{if(!this.app.destroyed)this.updateButton.disabled=false;}
+        }
+        diagnosticPage() {
+            const page=el('div'),c=this.card('輸入測試中心',page);c.append(el('div','hint','RAW：虛擬原始輸入；OUT：套用曲線與映射後的虛擬輸出。實體原始與處理後數值分開列出，不宣稱可量測雲端遊戲延遲。'));
+            this.diagnostics=el('pre','v15-diagnostics');c.append(this.diagnostics,button('清除虛擬輸入／全停',()=>this.app.stopAll(),'danger'));return page;
+        }
+        syncQuickbar() {
+            if(!this.quickbar)return;this.quickbar.hidden=!this.p.showQuickbar;this.quickItems.hidden=this.p.quickbarCollapsed;this.quickToggle.textContent=this.p.quickbarCollapsed?'巨集 ▸':'巨集 ▾';this.quickToggle.setAttribute('aria-expanded',String(!this.p.quickbarCollapsed));
+            this.quickButtons.forEach((b,i)=>{const m=this.p.macros[i+1];b.textContent=`${i+1} ${m.name||'未命名'}`;b.title=m.name||`巨集 ${i+1}`;b.disabled=this.app.macro.recording||this.app.layout.editing||!m.events.length;b.classList.toggle('on',this.app.macro.playing&&this.app.macro.slot===i+1);});
+        }
+        tick(now) {
+            if(now-this.lastTick<100)return;this.lastTick=now;this.syncQuickbar();if(this.restoreButton)this.restoreButton.disabled=this.busy()||this.app.layout.editing;
+            if(this.app.shadow.activeElement!==this.layoutName)this.layoutName.value=this.p.layoutNames[this.p.layoutSlot];
+            if(this.panel.tab!=='diagnostics'||this.panel.collapsed)return;
+            const a=this.app,raw=a.rawSnapshot(),out=a.input.snapshot(),real=a.physical.state;
+            const describe=(label,s)=>`${label}\n按鍵：${s.buttons.map((v,i)=>v>0?`${LABELS[i]}=${v.toFixed(2)}`:'').filter(Boolean).join(' ')||'全部放開'}\n軸：${s.axes.map(v=>v.toFixed(3)).join(' / ')}`;
+            const keys=[...a.input.sources].map(([key,s])=>`${key}（優先 ${s.priority}）`).join('\n')||'無';
+            const physicalOut=this.p.physicalMapping?a.pipeline.process(real):real;
+            this.diagnostics.textContent=`${describe('RAW 虛擬原始',raw)}\n\n${describe('OUT 虛擬最終',out)}\n\n實體：${a.physical.connected?a.physical.id:'未連接'}\n${describe('實體原始',real)}\n${describe('實體送出',physicalOut)}\n\n作用中來源\n${keys}\n\n巨集：${a.macro.recording?'錄製中':a.macro.playing?'播放中':'停止'}\n虛擬槽位：${a.virtual.slot}\n目前來源按鍵由最大值合併；軸依優先順序仲裁。`;
+        }
+    }
+
     class App {
         constructor() {
             this.clock=()=>performance.now();this.abort=new AbortController();this.signal=this.abort.signal;this.destroyed=false;this.override=false;
@@ -725,21 +1258,34 @@
             this.input=new InputManager(this.clock);this.virtual=new VirtualGamepad(this.input,navigator,window);this.physical=new PhysicalGamepadMonitor(this.virtual);
             this.auto=new ButtonAutomation(this.input,this.config,this.clock);this.macro=new MacroEngine(this.input,this.config,this.clock);
             this.layout=new LayoutManager(this.config);this.pointers=new PointerManager(window,this.signal);this.racing=new RacingController(this);
+            this.pipeline=new InputPipeline(this.config);this.virtual.pipeline=this.pipeline;
+            this.rawSnapshot=this.input.snapshot.bind(this.input);this.input.snapshot=(filter)=>this.pipeline.process(this.rawSnapshot(filter));
+            this.input.recordingState=()=>this.rawSnapshot(key=>key!=='macro'&&key!=='afk');
+            const rawSet=this.input.set.bind(this.input),rawClear=this.input.clear.bind(this.input);
+            this.input.set=(key,...args)=>{if(this.shortcuts?.blocked.has(key))return;rawSet(key,...args);};
+            this.input.clear=key=>{this.shortcuts?.blocked.delete(key);rawClear(key);};
         }
         start() {
             this.host=el('div');this.host.id='bxg-v14-root';this.host.style.cssText='position:fixed;inset:0;pointer-events:none;z-index:2147483000;';
             this.shadow=this.host.attachShadow({mode:'open'});const style=el('style');style.textContent=CSS;this.shadow.append(style);document.documentElement.append(this.host);
-            for(const type of ['click','dblclick','contextmenu'])this.shadow.addEventListener(type,e=>e.stopPropagation(),{signal:this.signal});
+            // UI 的右鍵也會產生 pointer/mouse/auxclick；不可讓它們冒泡到串流頁面的滑鼠控制。
+            // 在 ShadowRoot 冒泡階段攔截，保留控制元件與全域 capture 的觸控清理流程。
+            for(const type of ['click','dblclick','contextmenu','pointerdown','pointerup','mousedown','mouseup','auxclick'])this.shadow.addEventListener(type,e=>{
+                e.stopPropagation();if(e.button===2)e.preventDefault();
+            },{signal:this.signal});
             this.panel=new ControlPanel(this);this.viewer=new ViewerHUD(this);this.racingView=new RacingRenderer(this);
+            this.touch=new TouchLayout(this);this.panel.refresh();
+            this.shortcuts=new ShortcutManager(this);this.advanced=new AdvancedTools(this);
             try {this.virtual.install();} catch(e) {this.notice('無法掛接虛擬手把。請停用其他手把腳本後重新整理。');throw e;}
             this.bindEvents();this.loop();
             if(this.warnings.length)this.notice(this.warnings.join(' '));
         }
         bindEvents() {
-            window.addEventListener('keydown',e=>{if(e.code==='F2'&&!e.repeat){e.preventDefault();this.shortcut();}},{signal:this.signal});
+            window.addEventListener('keydown',e=>{if(e.code==='F2'&&!e.repeat&&!e.composedPath().some(n=>n?.matches?.('input,select,textarea,[contenteditable=true]'))){e.preventDefault();this.shortcut();}},{signal:this.signal});
             window.addEventListener('blur',()=>this.suspend(),{signal:this.signal});
             document.addEventListener('visibilitychange',()=>{if(document.hidden)this.suspend();},{signal:this.signal});
             window.addEventListener('pagehide',()=>this.suspend(),{signal:this.signal});
+            window.addEventListener('offline',()=>{this.suspend();this.notice('網路已離線，已釋放所有虛擬輸入。');},{signal:this.signal});
             window.addEventListener('resize',()=>{this.pointers.cancelAll();this.panel.refresh();this.viewer.resize();this.racingView.resize();},{signal:this.signal});
             document.addEventListener('pointerdown',e=>{
                 if(this.popupNode&&!e.composedPath().includes(this.popupNode))this.closePopup();
@@ -765,8 +1311,16 @@
             this.lastRaceContact=-Infinity;this.panelPointers.clear();this.panelWakeUntil=-Infinity;
             if(this.panel)this.updatePanelFade(this.clock());
             this.panel?.refreshStatus();
+            this.shortcuts?.blocked.clear();this.shortcuts?.holdSince.clear();
         }
         suspend() {this.stopAll();this.override=false;this.closePopup();this.updateVisibility();}
+        changeModeAfterRestore() {
+            const p=this.config.prefs;
+            this.panel.root.style.left=p.gameMode==='racing'?'15px':p.panelPos?.x||'15px';
+            this.panel.root.style.top=p.gameMode==='racing'?'15px':p.panelPos?.y||`${Math.max(15,window.innerHeight-280*p.uiScale)}px`;
+            this.viewer.root.style.left=p.viewerPos.x;this.viewer.root.style.top=p.viewerPos.y;
+            this.override=false;this.panel.refresh();this.touch.positionPanel();this.clampElement(this.panel.root);this.viewer.resize();this.racingView.resize();this.updateVisibility();
+        }
         shortcut() {
             if(this.auto.modes.size){this.auto.stopModes();this.panel.refreshStatus();}
             else {this.pointers.cancelAll();this.panel.collapsed=!this.panel.collapsed;this.panel.refresh();}
@@ -779,7 +1333,28 @@
             else {this.panel.root.style.left=this.config.prefs.panelPos?.x||'15px';this.panel.root.style.top=this.config.prefs.panelPos?.y||`${Math.max(15,window.innerHeight-280)}px`;}
             this.config.save();this.panel.refresh();this.updateVisibility();
         }
-        playMacro(loop) {this.stopAll();this.macro.play(loop);this.panel.refresh();}
+        changeControlStyle(style=null) {
+            if(this.config.prefs.gameMode==='racing'){this.notice('賽車使用自己的操作區，請切回標準模式再選擇佈局。');return;}
+            const p=this.config.prefs,old=p.controlStyle,next=style|| (old==='panel'?'touch':'panel');
+            if(!['panel','touch'].includes(next)||next===old)return;
+            this.stopAll();this.closePopup();this.layout.editing=false;p.controlStyle=next;
+            if(!this.config.save()){p.controlStyle=old;this.notice('佈局切換儲存失敗，已保留原模式。');}
+            this.override=false;this.manualUntil=this.clock()+2500;this.panel.refresh();this.updateVisibility();
+        }
+        playMacro(loop,slot=this.macro.slot) {if(this.macro.recording){this.notice('請先停止錄製，再播放巨集。');return;}this.stopAll();this.macro.slot=slot;if(!this.macro.play(loop))this.notice(`槽位 ${slot} 沒有可播放的動作。`);this.panel.refresh();}
+        startRecording() {
+            if(this.macro.recording)return;
+            if(this.layout.editing){this.notice('請先完成佈局編輯，再錄製巨集。');return;}
+            const source=this.config.prefs.macroRecordSource;
+            if(source==='physical'){
+                this.physical.poll(this.clock());
+                if(!this.physical.connected){this.notice('未連接實體手把，無法開始錄製。');this.panel.refresh();return;}
+            }
+            this.stopAll();
+            const physicalIndex=source==='physical'?this.physical.lastIndex:null;
+            this.macro.record(source==='physical'?()=>this.physical.state:null,{source,physicalIndex});
+            this.override=false;this.updateVisibility();this.panel.refresh();
+        }
         clampElement(node) {
             if(!node||node.hidden)return;const rect=node.getBoundingClientRect();
             // CSS left/top 是視窗座標，不需除以 scale。
@@ -806,28 +1381,39 @@
         updateVisibility() {
             if(!this.panel||!this.viewer||!this.racingView)return;
             this.panel.root.hidden=this.override;this.viewer.root.hidden=!(this.override||this.config.prefs.showViewer);
+            this.touch?.updateVisibility();
             this.racingView.area.hidden=this.override||this.panel.collapsed||this.config.prefs.gameMode!=='racing';
         }
         updatePanelFade(now) {
-            const eligible=this.config.prefs.racingAutoFade&&this.config.prefs.gameMode==='racing'
+            const raceMode=this.config.prefs.gameMode==='racing',touchMode=!raceMode&&this.config.prefs.controlStyle==='touch';
+            const eligible=(raceMode?this.config.prefs.racingAutoFade:touchMode&&this.config.prefs.touchAutoFade)
                 &&!this.panel.collapsed&&!this.panel.tab&&!this.layout.editing&&!this.override;
             // 使用觸控工作階段，不只看 pointermove；按住油門不移動也會持續淡化。
             if(!eligible)this.lastRaceContact=-Infinity;
-            else if(this.racing.left||this.racing.right)this.lastRaceContact=now;
+            else if(raceMode?(this.racing.left||this.racing.right):[...this.pointers.sessions.values()].some(s=>this.touch.root.contains(s.el)))this.lastRaceContact=now;
             const awake=this.panelPointers.size>0||now<this.panelWakeUntil;
             const dim=eligible&&!awake&&now-this.lastRaceContact<1000;
             // 頂部面板一被觸碰就立即清楚，其餘淡入淡出則平滑過渡。
             styleValue(this.panel.root,'transition',awake?'none':'opacity 200ms ease');
             styleValue(this.panel.root,'opacity',dim?'0.25':'1');
+            if(this.touch?.active){styleValue(this.touch.root,'transition',awake?'none':'opacity 200ms ease');styleValue(this.touch.root,'opacity',dim&&raceMode?'0.25':'1');}
+            if(this.advanced?.quickbar){const race=this.config.prefs.gameMode==='racing';styleValue(this.advanced.quickbar,'top',race?'64px':'35%');styleValue(this.advanced.quickbar,'maxHeight',race?'80px':'65vh');}
         }
         loop() {
             if(this.destroyed)return;
-            const now=this.clock();this.physical.poll(now);
-            const shouldOverride=this.physical.connected&&now-this.physical.lastActivity<2500&&now>=this.manualUntil&&!this.layout.editing&&!this.pointers.busy;
+            const now=this.clock(),physicalRecording=this.macro.recording&&this.macro.recordSource==='physical';
+            this.physical.poll(now,physicalRecording?this.macro.physicalIndex:null);
+            if(physicalRecording){
+                if(this.physical.connected)this.macro.capture();
+                else{this.macro.stopRecording();this.panel.refresh();this.notice('錄製來源手把已斷線，已停止並保存本次錄製。');}
+            }
+            const diagnosing=this.panel.tab==='diagnostics'&&!this.panel.collapsed;
+            const shouldOverride=this.physical.connected&&now-this.physical.lastActivity<2500&&now>=this.manualUntil&&!this.layout.editing&&!this.pointers.busy&&!this.macro.recording&&!diagnosing;
             if(shouldOverride!==this.override){this.override=shouldOverride;if(!shouldOverride)this.panel.refresh();}
             this.auto.tick(now);this.macro.tick(now);this.racing.tick(now);
-            const virtualState=this.input.snapshot();
-            const combo=(virtualState.buttons[10]>0.05&&virtualState.buttons[11]>0.05)||(this.physical.state.buttons[10]>0.05&&this.physical.state.buttons[11]>0.05);
+            this.shortcuts.tick(now);this.advanced.tick(now);
+            const virtualState=this.rawSnapshot();
+            const combo=!this.macro.recording&&((virtualState.buttons[10]>0.05&&virtualState.buttons[11]>0.05)||(this.physical.state.buttons[10]>0.05&&this.physical.state.buttons[11]>0.05));
             if(combo){if(this.comboSince===null)this.comboSince=now;if(!this.comboFired&&now-this.comboSince>=1500){this.comboFired=true;this.shortcut();}}
             else {this.comboSince=null;this.comboFired=false;}
             this.virtual.sync(this.virtual.readPhysical());this.updateVisibility();this.updatePanelFade(now);
@@ -847,10 +1433,11 @@
 
     // 測試可載入純邏輯類別，不啟動 DOM，也不改寫真實 navigator。
     if(typeof module==='object'&&module.exports) {
-        module.exports={ConfigStore,InputManager,VirtualGamepad,PhysicalGamepadMonitor,ButtonAutomation,MacroEngine,MacroBackup,LayoutManager,PointerManager,RacingController,App};return;
+        module.exports={ConfigStore,InputManager,VirtualGamepad,PhysicalGamepadMonitor,ButtonAutomation,MacroEngine,MacroBackup,MacroTimeline,ConfigurationBackup,InputPipeline,LayoutManager,PointerManager,RacingController,App};return;
     }
     if(window.top!==window.self)return;
     const boot=()=>{window.__BXG_V14__?.destroy?.();const app=new App();window.__BXG_V14__=app;
         try{app.start();}catch(e){console.error('[xCloud v14] 啟動失敗',e);app.destroy();alert('xCloud v14 啟動失敗，請查看 Console 並確認舊版已停用。');}};
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
+
