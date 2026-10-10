@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Better xCloud Gamepad v14 (模組重建版)
 // @namespace    http://tampermonkey.net/
-// @version      15.0.1
+// @version      15.0.2
 // @updateURL    https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
 // @downloadURL  https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
@@ -13,7 +13,7 @@
 // ==/UserScript==
 
 /*
- * v15.0.1 — 修正右鍵由連發切換鎖定時缺少放開邊緣，保留 v15 完整功能。
+ * v15.0.2 — 隔離控制介面的右鍵滑鼠事件，統一右鍵與多擊的鎖定入口。
  * 沿用 v14 的名稱、namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -24,7 +24,7 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.0.1';
+    const VERSION = '15.0.2';
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(Number(v)) ? Number(v) : 0));
     const clone = value => JSON.parse(JSON.stringify(value));
     const slots = factory => Object.fromEntries(Array.from({length: 6}, (_, i) => [i + 1, factory()]));
@@ -447,7 +447,8 @@
         bind(el,start) {
             el.style.touchAction='none';
             el.addEventListener('pointerdown',e=>{
-                if(e.button!==0||this.sessions.has(e.pointerId)) return;
+                if(e.button!==0){if(e.button===2){e.preventDefault();e.stopPropagation();}return;}
+                if(this.sessions.has(e.pointerId)) return;
                 const session=start(e); if(!session) return;
                 e.preventDefault();e.stopPropagation(); session.el=el;this.sessions.set(e.pointerId,session);
                 try{el.setPointerCapture(e.pointerId);}catch{/* Detached test elements do not support capture. */}
@@ -715,7 +716,10 @@
                 }};
             });
             node.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation();
-                if(!this.app.layout.editing&&this.p.gameMode==='standard'){this.app.manualStart();this.app.auto.cycle(id);this.refresh();}});
+                if(!this.app.layout.editing&&this.p.gameMode==='standard'){
+                    this.tapStates.delete(id);
+                    this.setMode(id,{none:'interval',interval:'hold',hold:'none'}[this.app.auto.mode(id)]);
+                }});
             return node;
         }
         createStick(axis) {
@@ -1074,7 +1078,11 @@
         start() {
             this.host=el('div');this.host.id='bxg-v14-root';this.host.style.cssText='position:fixed;inset:0;pointer-events:none;z-index:2147483000;';
             this.shadow=this.host.attachShadow({mode:'open'});const style=el('style');style.textContent=CSS;this.shadow.append(style);document.documentElement.append(this.host);
-            for(const type of ['click','dblclick','contextmenu'])this.shadow.addEventListener(type,e=>e.stopPropagation(),{signal:this.signal});
+            // UI 的右鍵也會產生 pointer/mouse/auxclick；不可讓它們冒泡到串流頁面的滑鼠控制。
+            // 在 ShadowRoot 冒泡階段攔截，保留控制元件與全域 capture 的觸控清理流程。
+            for(const type of ['click','dblclick','contextmenu','pointerdown','pointerup','mousedown','mouseup','auxclick'])this.shadow.addEventListener(type,e=>{
+                e.stopPropagation();if(e.button===2)e.preventDefault();
+            },{signal:this.signal});
             this.panel=new ControlPanel(this);this.viewer=new ViewerHUD(this);this.racingView=new RacingRenderer(this);
             this.shortcuts=new ShortcutManager(this);this.advanced=new AdvancedTools(this);
             try {this.virtual.install();} catch(e) {this.notice('無法掛接虛擬手把。請停用其他手把腳本後重新整理。');throw e;}
