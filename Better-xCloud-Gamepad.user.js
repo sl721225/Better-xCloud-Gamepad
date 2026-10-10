@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Better xCloud Gamepad v14 (模組重建版)
 // @namespace    http://tampermonkey.net/
-// @version      15.0.3
+// @version      15.0.4
 // @updateURL    https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
 // @downloadURL  https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
@@ -13,7 +13,7 @@
 // ==/UserScript==
 
 /*
- * v15.0.3 — 新增實體手把巨集錄製與來源切換，放大巨集操作圖示。
+ * v15.0.4 — 診斷頁展開時保留面板，禁止實體輸入自動切換展示 HUD。
  * 沿用 v14 的名稱、namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -24,7 +24,7 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.0.3';
+    const VERSION = '15.0.4';
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(Number(v)) ? Number(v) : 0));
     const clone = value => JSON.parse(JSON.stringify(value));
     const slots = factory => Object.fromEntries(Array.from({length: 6}, (_, i) => [i + 1, factory()]));
@@ -727,7 +727,8 @@
             return page;
         }
         openTab(tab) {if(this.app.layout.editing&&tab!=='layout'){this.app.pointers.cancelAll();this.app.layout.editing=false;}
-            this.tab=tab;if(tab)this.collapsed=false;this.refresh();}
+            this.tab=tab;if(tab)this.collapsed=false;this.refresh();
+            if(tab==='diagnostics'){this.app.override=false;this.app.updateVisibility();}}
         setMode(id,mode) {this.app.manualStart();this.app.auto.set(id,mode);this.refresh();}
         createKey(id,width=44,height=32) {
             const node=el('button','padkey',LABELS[id]);node.type='button';node.dataset.id=id;node.dataset.mode='none';
@@ -1244,7 +1245,8 @@
                 if(this.physical.connected)this.macro.capture();
                 else{this.macro.stopRecording();this.panel.refresh();this.notice('錄製來源手把已斷線，已停止並保存本次錄製。');}
             }
-            const shouldOverride=this.physical.connected&&now-this.physical.lastActivity<2500&&now>=this.manualUntil&&!this.layout.editing&&!this.pointers.busy&&!this.macro.recording;
+            const diagnosing=this.panel.tab==='diagnostics'&&!this.panel.collapsed;
+            const shouldOverride=this.physical.connected&&now-this.physical.lastActivity<2500&&now>=this.manualUntil&&!this.layout.editing&&!this.pointers.busy&&!this.macro.recording&&!diagnosing;
             if(shouldOverride!==this.override){this.override=shouldOverride;if(!shouldOverride)this.panel.refresh();}
             this.auto.tick(now);this.macro.tick(now);this.racing.tick(now);
             this.shortcuts.tick(now);this.advanced.tick(now);
