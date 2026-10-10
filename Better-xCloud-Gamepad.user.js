@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Better xCloud Gamepad v14 (模組重建版)
 // @namespace    http://tampermonkey.net/
-// @version      15.1.0
+// @version      15.1.1
 // @updateURL    https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
 // @downloadURL  https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/Better-xCloud-Gamepad.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
@@ -13,7 +13,7 @@
 // ==/UserScript==
 
 /*
- * v15.1.0 — 標準面板／觸控佈局、頂部快切、獨立位置與觸控尺寸／透明度。
+ * v15.1.1 — 頂部操作依模式、功能、安全分組，窄版固定雙列。
  * 沿用 v14 的名稱、namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -24,7 +24,7 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.1.0';
+    const VERSION = '15.1.1';
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(Number(v)) ? Number(v) : 0));
     const clone = value => JSON.parse(JSON.stringify(value));
     const slots = factory => Object.fromEntries(Array.from({length: 6}, (_, i) => [i + 1, factory()]));
@@ -541,7 +541,9 @@
     button.on{background:#235341;color:#baffdc;border-color:#74efb4} button.danger{color:#ffaba9;border-color:#ff777766;background:#482c34}
     .panel,.viewer,.popup{position:fixed;pointer-events:auto;user-select:none;border:1px solid var(--line);border-radius:16px;background:#111c29ed;box-shadow:0 8px 30px #0005;transform-origin:top left}
     .panel{padding:10px;width:550px;z-index:5}.panel.transparent{background:transparent;box-shadow:none}.panel.transparent .controls{background:transparent}
-    .header,.row,.tabs,.status{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.header{justify-content:space-between;min-height:28px}
+    .header,.row,.tabs,.status{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.header{display:grid;grid-template-columns:auto auto 1fr auto;gap:8px;min-height:28px}
+    .toolbar-group{display:flex;align-items:center;gap:5px;white-space:nowrap}.toolbar-functions{border-left:1px solid var(--line);padding-left:8px}.toolbar-actions{border-left:1px solid var(--line);padding-left:8px;justify-self:end}
+    .compact-toolbar .header{grid-template-columns:auto 1fr auto;row-gap:6px}.compact-toolbar .toolbar-modes{grid-column:2 / 4}.compact-toolbar .toolbar-functions{grid-column:1 / 3;border-left:0;padding-left:0}.compact-toolbar .toolbar-actions{grid-column:3}
     .brand{font-size:11px;letter-spacing:.8px;color:var(--green);cursor:grab;touch-action:none;padding:7px 4px}
     .meta,.hint{font-size:10px;color:var(--muted);line-height:1.6}.hint{margin-top:8px}.status{margin-top:7px}.status:empty{display:none}
     .status button{font-size:10px;padding:4px 7px}.tabs{margin:10px 0;border-top:1px solid var(--line);padding-top:8px}
@@ -656,14 +658,16 @@
             this.app=app;this.config=app.config;this.p=this.config.prefs;this.root=el('section','panel');
             this.root.setAttribute('aria-label','虛擬手把控制面板');this.collapsed=false;this.tab=null;this.dirty=true;
             this.buttons=[];this.sticks=[];this.tapStates=new Map();
-            this.header=el('div','header');this.drag=el('span','brand','⠿  XCLOUD / 15');
+            this.header=el('div','header');this.drag=el('span','brand','⠿');this.drag.title='拖曳面板';this.drag.setAttribute('aria-label','拖曳面板');
             this.collapseBtn=button('收合',()=>{app.pointers.cancelAll();this.collapsed=!this.collapsed;this.refresh();});
-            this.modeBtn=button('',()=>app.changeMode());this.toolBtn=button('工具',()=>this.openTab(this.tab&&this.tab!=='macro'?null:'settings'));
+            this.modeBtn=button('',()=>app.changeMode());this.toolBtn=button('設定 ⚙',()=>this.openTab(this.tab==='settings'&&!this.collapsed?null:'settings'));
             this.macroQuick=button('巨集',()=>this.openTab(this.tab==='macro'&&!this.collapsed?null:'macro'));
             this.styleQuick=button('面板',()=>app.changeControlStyle());this.styleQuick.setAttribute('aria-label','快速切換標準／觸控佈局');
             this.helpBtn=button('?',()=>{this.p.showHelp=!this.p.showHelp;this.config.save();this.refresh();});this.helpBtn.setAttribute('aria-label','顯示操作說明');
-            this.stopBtn=button('全停',()=>app.stopAll(),'danger');
-            this.header.append(this.drag,this.modeBtn,this.macroQuick,this.helpBtn,this.styleQuick,this.toolBtn,this.collapseBtn,this.stopBtn);
+            this.stopBtn=button('■ 全停',()=>app.stopAll(),'danger');
+            const modes=el('div','toolbar-group toolbar-modes'),functions=el('div','toolbar-group toolbar-functions'),actions=el('div','toolbar-group toolbar-actions');
+            modes.append(this.modeBtn,this.styleQuick);functions.append(this.macroQuick,this.toolBtn,this.helpBtn);actions.append(this.collapseBtn,this.stopBtn);
+            this.header.append(this.drag,modes,functions,actions);
             this.status=el('div','status');this.status.setAttribute('aria-label','作用中狀態');
             this.tabs=el('div','tabs');this.tabButtons={};
             for(const [key,title] of [['settings','設定'],['macro','巨集'],['layout','佈局']]) {
@@ -915,6 +919,7 @@
             this.root.classList.toggle('help-off',!this.p.showHelp);this.app.racingView?.area.classList.toggle('help-off',!this.p.showHelp);
             this.helpBtn.classList.toggle('on',this.p.showHelp);this.helpBtn.setAttribute('aria-pressed',String(this.p.showHelp));this.helpBtn.title=this.p.showHelp?'隱藏操作說明':'顯示操作說明';
             this.macroQuick.classList.toggle('on',this.tab==='macro'&&!this.collapsed);this.macroQuick.setAttribute('aria-expanded',String(this.tab==='macro'&&!this.collapsed));
+            this.toolBtn.classList.toggle('on',this.tab==='settings'&&!this.collapsed);this.toolBtn.setAttribute('aria-expanded',String(this.tab==='settings'&&!this.collapsed));
             const racing=this.p.gameMode==='racing';this.root.classList.toggle('compact',racing);this.root.classList.toggle('split',this.p.splitMode&&!racing);
             const touch=this.p.controlStyle==='touch'&&!racing;
             this.root.classList.toggle('touch-mode',touch);
@@ -923,6 +928,7 @@
             this.root.classList.toggle('transparent',this.p.bgTrans);this.root.classList.toggle('editing',this.app.layout.editing);
             const width=this.collapsed?350:touch&&!this.tab?400:this.p.splitMode&&!racing&&!touch?Math.max(550,(window.innerWidth-30)/this.p.uiScale):550;
             this.effectiveScale=Math.min(this.p.uiScale,(window.innerWidth-16)/width);
+            this.root.classList.toggle('compact-toolbar',width*this.effectiveScale<480);
             this.root.style.transform=`scale(${this.effectiveScale})`;
             this.root.style.width=`${width}px`;
             this.modeBtn.textContent=racing?'賽車':'標準';this.collapseBtn.textContent=this.collapsed?'展開':'收合';
