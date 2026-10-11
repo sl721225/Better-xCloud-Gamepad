@@ -1,7 +1,9 @@
 // ==UserScript==
 // @name         CloudPad Studio
+// @homepageURL https://github.com/sl721225/Better-xCloud-Gamepad
+// @supportURL  https://github.com/sl721225/Better-xCloud-Gamepad/issues
 // @namespace    http://tampermonkey.net/
-// @version      15.3.0
+// @version      15.3.1
 // @updateURL    https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/CloudPad-Studio.user.js
 // @downloadURL  https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/CloudPad-Studio.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
@@ -13,7 +15,7 @@
 // ==/UserScript==
 
 /*
- * v15.3.0 — 繁體中文 / English 即時切換；保留既有設定、巨集與備份相容性。
+ * v15.3.1 — 繁體中文 / English 即時切換；保留既有設定、巨集與備份相容性。
  * 沿用既有 namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -24,7 +26,7 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.3.0';
+    const VERSION = '15.3.1';
     const APP_NAME = 'CloudPad Studio';
 
     // UI strings are separate from user macro/layout names and serialized input data.
