@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         CloudPad Studio
-// @homepageURL https://github.com/sl721225/Better-xCloud-Gamepad
-// @supportURL  https://github.com/sl721225/Better-xCloud-Gamepad/issues
+// @homepageURL https://github.com/sl721225/CloudPad-Studio
+// @supportURL  https://github.com/sl721225/CloudPad-Studio/issues
 // @namespace    http://tampermonkey.net/
 // @version      15.3.1
-// @updateURL    https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/CloudPad-Studio.user.js
-// @downloadURL  https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest/download/CloudPad-Studio.user.js
+// @updateURL    https://github.com/sl721225/CloudPad-Studio/releases/latest/download/CloudPad-Studio.user.js
+// @downloadURL  https://github.com/sl721225/CloudPad-Studio/releases/latest/download/CloudPad-Studio.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
 // @author       You
 // @match        *://*.xbox.com/*
@@ -1551,7 +1551,7 @@
             c.append(row,el('div','hint',()=>translateUI('備份包含六組巨集、六組佈局、名稱、曲線、映射與介面設定。匯入只保存設定，不會自動啟動巨集／連發。')));
             this.backupPreview=el('div','v15-card');this.backupPreview.hidden=true;c.append(this.backupPreview);
             const update=this.card(()=>translateUI('版本與更新'),page);update.append(el('div','meta',()=>`${APP_NAME} · v${VERSION}`));this.updateMessage=this.message(update);
-            this.updateButton=button(()=>translateUI('檢查正式版更新'),()=>this.checkUpdate());const releases=el('a','',()=>translateUI('開啟正式版本下載頁'));releases.href='https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest';releases.target='_blank';releases.rel='noopener noreferrer';releases.style.color='var(--green)';update.append(this.updateButton,releases,el('div','hint',()=>translateUI('只追蹤正式 Release，不使用 main 測試版本。自動更新依腳本管理器設定執行；遊戲中不強制重載。')));
+            this.updateButton=button(()=>translateUI('檢查正式版更新'),()=>this.checkUpdate());const releases=el('a','',()=>translateUI('開啟正式版本下載頁'));releases.href='https://github.com/sl721225/CloudPad-Studio/releases/latest';releases.target='_blank';releases.rel='noopener noreferrer';releases.style.color='var(--green)';update.append(this.updateButton,releases,el('div','hint',()=>translateUI('只追蹤正式 Release，不使用 main 測試版本。自動更新依腳本管理器設定執行；遊戲中不強制重載。')));
             return page;
         }
         download(name,text,message) {
@@ -1588,7 +1588,7 @@
             this.updateButton.disabled=true;setText(this.updateMessage,()=>translateUI('正在查詢正式 Release…'));
             try {
                 const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);this.app.signal.addEventListener('abort',()=>controller.abort(),{once:true});let response;
-                try{response=await fetch('https://api.github.com/repos/sl721225/Better-xCloud-Gamepad/releases/latest',{signal:controller.signal,credentials:'omit',headers:{Accept:'application/vnd.github+json'}});}finally{clearTimeout(timer);}
+                try{response=await fetch('https://api.github.com/repos/sl721225/CloudPad-Studio/releases/latest',{signal:controller.signal,credentials:'omit',headers:{Accept:'application/vnd.github+json'}});}finally{clearTimeout(timer);}
                 if(!response.ok)throw Error((translateUI("GitHub 回應 ")+String(response.status)+translateUI("，請稍後重試或開啟下載頁。")));const release=await response.json();if(this.app.destroyed)return;
                 if(release.draft||release.prerelease||!/^v?\d+\.\d+\.\d+$/.test(release.tag_name))throw Error(translateUI('未找到有效的正式版本。'));
                 const latest=release.tag_name.replace(/^v/,''),a=latest.split('.').map(Number),b=VERSION.split('.').map(Number);let newer=false;for(let i=0;i<3;i++){if(a[i]!==b[i]){newer=a[i]>b[i];break;}}
