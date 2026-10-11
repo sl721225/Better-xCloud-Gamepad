@@ -5,8 +5,8 @@
 本專案原名 Better xCloud Gamepad，自 v15.2.0 起採用獨立名稱 CloudPad Studio。程式使用瀏覽器的 Gamepad API，沒有 Better xCloud 專用介面或必要依賴。實際 Xbox 串流相容性請依裝置與遊戲測試；腳本本身不提供 VPN 或地區解鎖功能。
 
 ## 版本
-- 正式版：v15.1.3（舊名稱），見 [Releases](https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest)。
-- 開發測試版：v15.3.0，位於 v15-development；支援繁體中文 / English。
+- 正式版：CloudPad Studio v15.3.0，見 [Releases](https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest)。
+- 開發分支：v15-development；目前與 v15.3.0 正式版一致。
 
 ## 安裝／改名升級
 1. 在 Tampermonkey 或 Violentmonkey 打開原有腳本的編輯器。
@@ -20,7 +20,7 @@
 保留既有瀏覽器設定儲存位置，原有六組巨集、標準／觸控／賽車佈局繼續可用。新匯出檔採 CloudPad Studio 名稱與格式識別；舊版 JSON 巨集、完整設定及佈局備份仍可匯入。新格式備份建議使用 v15.2.0 以上版本還原。
 
 ## 更新相容性
-GitHub 倉庫網址暫留原址，避免舊連結失效。CloudPad-Studio.user.js 是新檔名；Better-xCloud-Gamepad.user.js 保留作為相容入口，內容相同。新版本正式發布時需同時附上這兩個安裝檔，舊更新連結才能繼續使用；目前 latest 仍是已發布的 v15.1.3。
+GitHub 倉庫網址暫留原址，避免舊連結失效。CloudPad-Studio.user.js 是新檔名；Better-xCloud-Gamepad.user.js 保留作為相容入口，內容相同。新版本正式發布時需同時附上這兩個安裝檔，舊更新連結才能繼續使用；v15.3.0 正式 Release 同時提供新舊兩個安裝檔，內容相同。
 
 ## 驗證
 已完成不載入 Better xCloud 的本機瀏覽器測試，包括虛擬按鍵輸出、觸控多指、賽車位置、重新注入、巨集錄製、右鍵鎖定、淡化及新舊備份相容性。這不等同於真實 Xbox 串流遊戲測試。
