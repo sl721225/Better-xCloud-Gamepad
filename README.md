@@ -6,11 +6,11 @@
 
 ## 版本
 - 正式版：v15.1.3（舊名稱），見 [Releases](https://github.com/sl721225/Better-xCloud-Gamepad/releases/latest)。
-- 改名測試版：v15.2.0，位於 v15-development。
+- 開發測試版：v15.3.0，位於 v15-development；支援繁體中文 / English。
 
 ## 安裝／改名升級
 1. 在 Tampermonkey 或 Violentmonkey 打開原有腳本的編輯器。
-2. 用 CloudPad-Studio.user.js 或 CloudPad-Studio-v15.2.0.txt 的完整內容取代原有程式，儲存。
+2. 用 CloudPad-Studio.user.js 或 CloudPad-Studio-v15.3.0.txt 的完整內容取代原有程式，儲存。
 3. 重新整理 Xbox 頁面。
 4. 確認只有一份 CloudPad Studio 啟用。若另裝成新腳本，先停用舊版，避免兩個手把輸出同時運作。
 
@@ -24,3 +24,6 @@ GitHub 倉庫網址暫留原址，避免舊連結失效。CloudPad-Studio.user.j
 
 ## 驗證
 已完成不載入 Better xCloud 的本機瀏覽器測試，包括虛擬按鍵輸出、觸控多指、賽車位置、重新注入、巨集錄製、右鍵鎖定、淡化及新舊備份相容性。這不等同於真實 Xbox 串流遊戲測試。
+
+## Language / 語言
+在設定最上方選擇「繁體中文 / English」，立即生效並保存。既有使用者保留繁體中文，新使用者依瀏覽器語言預選。切換不會停止錄製或播放、不會丟失巨集編輯草稿；自訂名稱保持原樣。
