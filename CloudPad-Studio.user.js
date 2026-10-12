@@ -3,7 +3,7 @@
 // @homepageURL https://github.com/sl721225/CloudPad-Studio
 // @supportURL  https://github.com/sl721225/CloudPad-Studio/issues
 // @namespace    http://tampermonkey.net/
-// @version      15.3.1
+// @version      15.4.0
 // @updateURL    https://github.com/sl721225/CloudPad-Studio/releases/latest/download/CloudPad-Studio.user.js
 // @downloadURL  https://github.com/sl721225/CloudPad-Studio/releases/latest/download/CloudPad-Studio.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
@@ -15,7 +15,7 @@
 // ==/UserScript==
 
 /*
- * v15.3.1 — 繁體中文 / English 即時切換；保留既有設定、巨集與備份相容性。
+ * v15.4.0 — 細框觸控／賽車按鍵與單列收合工具列；保留既有輸入與佈局。
  * 沿用既有 namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -26,7 +26,7 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.3.1';
+    const VERSION = '15.4.0';
     const APP_NAME = 'CloudPad Studio';
 
     // UI strings are separate from user macro/layout names and serialized input data.
@@ -944,6 +944,30 @@
     .vbottom{display:flex;align-items:center;justify-content:space-between;gap:7px}.vstick{width:46px;height:46px;border-radius:50%;border:1px solid #ffffff33;display:grid;place-items:center;position:relative;background:#0a1420}.vdot{width:20px;height:20px;background:#7890a6;border:1px solid #b3c5d7;border-radius:50%;display:grid;place-items:center;font-size:7px;color:#081727}.vdot.active{background:var(--green)}
     .vcross{display:grid;grid-template-columns:repeat(3,18px);grid-template-rows:repeat(3,18px);gap:2px}.vcross .vkey{min-width:0;height:18px;font-size:8px}.vface .vkey{border-radius:50%}
     .viewerfoot{display:flex;justify-content:flex-end;margin-top:7px}.viewerfoot button{padding:3px 7px;font-size:10px}.popup{z-index:10;padding:8px;display:flex;gap:6px;flex-wrap:wrap;max-width:calc(100vw - 16px)}
+
+    /* Collapsed controls keep macros, settings, expand and emergency stop directly available. */
+    .panel.collapsed{padding:6px 8px;border-radius:12px;background:#111c29b8;box-shadow:0 3px 12px #0003}
+    .panel.collapsed .header{display:flex;flex-wrap:nowrap;gap:5px;min-height:30px}
+    .panel.collapsed .toolbar-modes,.panel.collapsed .help-toggle{display:none}
+    .panel.collapsed .toolbar-functions{border:0;padding:0;gap:4px}
+    .panel.collapsed .toolbar-actions{margin-left:auto;padding-left:5px;gap:4px}
+    .panel.collapsed .header button{padding:6px 5px;min-height:30px}
+    .panel.collapsed .brand{padding:6px 2px}
+    /* Only touch/racing controls use the outline treatment; hit areas and positions stay intact. */
+    .touchdock .padkey,.touch-utility .padkey{background:#10182012;border:1.5px solid #ffffffa6;text-shadow:0 1px 3px #000;box-shadow:0 1px 4px #0005;transition:background .1s,border-color .1s}
+    .touchdock .padkey[data-id="0"],.touchdock .padkey[data-id="1"],.touchdock .padkey[data-id="2"],.touchdock .padkey[data-id="3"]{border-color:currentColor}
+    .touchdock .stick{background:#1018200d;border:1.5px solid #ffffffa6;box-shadow:0 1px 4px #0004}
+    .touchdock .knob{background:#ffffff0d;color:#edf4fa;border:1.5px solid #ffffffb3;text-shadow:0 1px 3px #000}
+    .touchdock .stick.active{border-color:var(--green)}.touchdock .stick.active .knob{background:#39725d99;border-color:var(--green)}
+    .touchdock .padkey.active,.touch-utility .padkey.active{background:#39725db3;color:#fff;box-shadow:0 0 8px #74efb466}
+    .touchdock .padkey.trigger,.touch-utility .padkey.trigger{background:linear-gradient(to top,#3b8267b3 var(--depth,0%),#10182012 var(--depth,0%))}
+    .touchdock .padkey[data-mode="hold"],.touch-utility .padkey[data-mode="hold"]{border-color:#ff8585;box-shadow:0 0 0 1px #ff8585,inset 0 0 0 1px #ff8585}
+    .touchdock .padkey[data-mode="interval"],.touch-utility .padkey[data-mode="interval"]{border-color:#ffd26e;box-shadow:0 0 0 1px #ffd26e,inset 0 0 0 1px #ffd26e}
+    .touchdock .padkey[data-mode="hold"]::after,.touch-utility .padkey[data-mode="hold"]::after{content:'●';color:#ff8585}
+    .touchdock .padkey[data-mode="interval"]::after,.touch-utility .padkey[data-mode="interval"]::after{content:'∞';color:#ffd26e}
+    .touchdock .padkey[data-mode]::after,.touch-utility .padkey[data-mode]::after{position:absolute;right:-4px;top:-6px;font-size:11px;line-height:15px;text-shadow:0 1px 3px #000;pointer-events:none}
+    .touchdock.editing .padkey,.panel.editing .touch-utility .padkey{background:#1b2938ee;transition:none}
+    .touchdock.editing .stick{background:#0a1420e6}.touchdock.editing .knob{background:#728599;color:#172432}
     .notice{position:fixed;top:12px;left:50%;transform:translateX(-50%);max-width:90vw;background:#512b31;color:#ffdedc;padding:10px 16px;border-radius:10px;z-index:20;pointer-events:auto;font-size:12px}
     `;
 
@@ -1312,7 +1336,7 @@
         }
         refresh() {
             this.app.touch?.sync();
-            this.root.classList.toggle('help-off',!this.p.showHelp);this.app.racingView?.area.classList.toggle('help-off',!this.p.showHelp);
+            this.root.classList.toggle('collapsed',this.collapsed);this.helpBtn.classList.add('help-toggle');this.root.classList.toggle('help-off',!this.p.showHelp);this.app.racingView?.area.classList.toggle('help-off',!this.p.showHelp);
             this.helpBtn.classList.toggle('on',this.p.showHelp);this.helpBtn.setAttribute('aria-pressed',String(this.p.showHelp));setLabel(this.helpBtn,'title',()=>this.p.showHelp?translateUI('隱藏操作說明'):translateUI('顯示操作說明'));
             this.macroQuick.classList.toggle('on',this.tab==='macro'&&!this.collapsed);this.macroQuick.setAttribute('aria-expanded',String(this.tab==='macro'&&!this.collapsed));
             this.toolBtn.classList.toggle('on',this.tab==='settings'&&!this.collapsed);this.toolBtn.setAttribute('aria-expanded',String(this.tab==='settings'&&!this.collapsed));
@@ -1322,9 +1346,9 @@
             setText(this.styleQuick,()=>touch?translateUI('觸控'):translateUI('面板'));this.styleQuick.disabled=racing;this.styleQuick.setAttribute('aria-pressed',String(touch));
             for(const [style,b] of Object.entries(this.layoutStyleButtons)){b.disabled=racing;b.classList.toggle('on',this.p.controlStyle===style);b.setAttribute('aria-pressed',String(this.p.controlStyle===style));}
             this.root.classList.toggle('transparent',this.p.bgTrans);this.root.classList.toggle('editing',this.app.layout.editing);
-            const width=this.collapsed?350:touch&&!this.tab?400:550;
+            const width=this.collapsed?300:touch&&!this.tab?400:550;
             this.effectiveScale=Math.min(this.p.uiScale,(window.innerWidth-16)/width);
-            this.root.classList.toggle('compact-toolbar',width*this.effectiveScale<480);
+            this.root.classList.toggle('compact-toolbar',!this.collapsed&&width*this.effectiveScale<480);
             this.root.style.transform=`scale(${this.effectiveScale})`;
             this.root.style.width=`${width}px`;
             if(racing){this.root.style.left=`${Math.max(8,(window.innerWidth-width*this.effectiveScale)/2)}px`;this.root.style.top=window.innerWidth<700?'66px':'15px';}
@@ -1818,4 +1842,3 @@
         try{app.start();}catch(e){console.error(translateUI('[CloudPad Studio] 啟動失敗'),e);app.destroy();alert(translateUI('CloudPad Studio 啟動失敗，請查看 Console 並確認舊版已停用。'));}};
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
 })();
-
