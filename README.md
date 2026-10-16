@@ -6,11 +6,11 @@
 
 ## 版本
 - 正式版：CloudPad Studio v15.3.0，見 [Releases](https://github.com/sl721225/CloudPad-Studio/releases/latest)。
-- 開發分支：v15-development；目前為 v15.4.0，新增細框觸控／賽車按鍵與單列收合工具列。
+- 開發分支：v15-development；目前為 v15.4.1，新增可選背景繼續播放巨集。
 
 ## 安裝／改名升級
 1. 在 Tampermonkey 或 Violentmonkey 打開原有腳本的編輯器。
-2. 用 CloudPad-Studio.user.js 或 CloudPad-Studio-v15.4.0.txt 的完整內容取代原有程式，儲存。
+2. 用 CloudPad-Studio.user.js 或 CloudPad-Studio-v15.4.1.txt 的完整內容取代原有程式，儲存。
 3. 重新整理 Xbox 頁面。
 4. 確認只有一份 CloudPad Studio 啟用。若另裝成新腳本，先停用舊版，避免兩個手把輸出同時運作。
 
