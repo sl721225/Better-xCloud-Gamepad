@@ -3,7 +3,7 @@
 // @homepageURL https://github.com/sl721225/CloudPad-Studio
 // @supportURL  https://github.com/sl721225/CloudPad-Studio/issues
 // @namespace    http://tampermonkey.net/
-// @version      15.4.0
+// @version      15.4.1
 // @updateURL    https://github.com/sl721225/CloudPad-Studio/releases/latest/download/CloudPad-Studio.user.js
 // @downloadURL  https://github.com/sl721225/CloudPad-Studio/releases/latest/download/CloudPad-Studio.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
@@ -15,7 +15,7 @@
 // ==/UserScript==
 
 /*
- * v15.4.0 — 細框觸控／賽車按鍵與單列收合工具列；保留既有輸入與佈局。
+ * v15.4.1 — 可選背景繼續播放巨集；預設保留失焦全停。
  * 沿用既有 namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -26,11 +26,16 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.4.0';
+    const VERSION = '15.4.1';
     const APP_NAME = 'CloudPad Studio';
 
     // UI strings are separate from user macro/layout names and serialized input data.
     const EN = {
+    "背景繼續播放巨集": "Keep macros playing in background",
+    "關閉（離開視窗即停止）": "Off (stop when leaving the window)",
+    "開啟（保留巨集播放）": "On (keep macro playback)",
+    "僅保留已啟動的巨集播放；錄製、手動輸入、連發、鎖定與 AFK 仍停止。背景計時可能被瀏覽器降頻；最小化、休眠或串流暫停時無法保證遊戲收到輸入。": "Keeps only existing macro playback. Recording, manual input, rapid fire, hold and AFK stop. Browsers may throttle background timers; input delivery is not guaranteed when minimized, suspended or the stream pauses.",
+    "長按保護只限制手動觸控按鍵／油門，不限制刻意鎖定或連發。失焦或隱藏分頁時依「背景繼續播放巨集」設定處理；離線或離開頁面時全停。全螢幕切換會取消觸控操作。": "Hold protection applies only to manual touch buttons / throttle, not deliberate hold or rapid fire. Focus loss and hidden tabs follow the background macro setting. Going offline or leaving the page stops all input. Fullscreen changes cancel touch input.",
     "無法讀取設定，使用暫存設定。": "Cannot read settings; using temporary settings.",
     "設定來自較新版本，停止覆寫。": "Settings are from a newer version; saving is disabled.",
     "設定 ": "Setting ",
@@ -395,7 +400,7 @@
     const GROUPS = {'0':'face','1':'face','2':'face','3':'face','12':'dpad','13':'dpad','14':'dpad','15':'dpad',
         '8':'center','9':'center','4':'leftTop','6':'leftTop','5':'rightTop','7':'rightTop',
         stick_0:'leftStick','10':'leftStick',stick_2:'rightStick','11':'rightStick'};
-    const DEFAULTS = () => ({language:'zh-TW',delay:3000, bgTrans:false, afkAmp:0.2, gameMode:'standard', comboTaps:false, racingAutoFade:true, showHelp:true,
+    const DEFAULTS = () => ({backgroundMacro:false,language:'zh-TW',delay:3000, bgTrans:false, afkAmp:0.2, gameMode:'standard', comboTaps:false, racingAutoFade:true, showHelp:true,
         splitMode:false, uiScale:1, showViewer:false, viewerScale:0.8, viewerPos:{x:'20px',y:'20px'},
         panelPos:null, layoutSlot:1, layouts:slots(() => ({})), macros:slots(() => ({name:'',duration:0,events:[]})),
         layoutNames:slots(()=>''),axisTuning:[0,1].map(()=>({deadzone:0,sensitivity:1,max:1,curve:'linear',invertX:false,invertY:false})),
@@ -414,7 +419,7 @@
         sanitize(data) {
             const p = DEFAULTS(); const d = data && typeof data === 'object' ? data : {};
             if(['zh-TW','en'].includes(d.language))p.language=d.language;
-            ['touchAutoFade','bgTrans','comboTaps','splitMode','showViewer','racingAutoFade','showHelp','physicalMapping','keyboardMacros','comboMacros','showQuickbar','quickbarCollapsed','emergencyEnabled'].forEach(k => {if (typeof d[k] === 'boolean') p[k]=d[k];});
+            ['backgroundMacro','touchAutoFade','bgTrans','comboTaps','splitMode','showViewer','racingAutoFade','showHelp','physicalMapping','keyboardMacros','comboMacros','showQuickbar','quickbarCollapsed','emergencyEnabled'].forEach(k => {if (typeof d[k] === 'boolean') p[k]=d[k];});
             p.macroSpeed=d.macroSpeed==null?1:clamp(d.macroSpeed,.25,3);
             if(['virtual','physical'].includes(d.macroRecordSource))p.macroRecordSource=d.macroRecordSource;
             if(['panel','touch'].includes(d.controlStyle))p.controlStyle=d.controlStyle;
@@ -743,7 +748,7 @@
             const d=clone(doc.settings),defaults=DEFAULTS();
             // v15.0.0～15.0.2 完整備份沒有來源設定，仍可還原為虛擬錄製。
             if(!('macroRecordSource' in d))d.macroRecordSource='virtual';
-            for(const key of ['language','touchAutoFade','racingLayouts','controlStyle','touchPanelPos','touchLayouts','touchButtonSize','touchStickSize','touchHitPadding','touchOpacityLeft','touchOpacityRight','touchOpacityUtility'])if(!(key in d))d[key]=clone(defaults[key]);
+            for(const key of ['backgroundMacro','language','touchAutoFade','racingLayouts','controlStyle','touchPanelPos','touchLayouts','touchButtonSize','touchStickSize','touchHitPadding','touchOpacityLeft','touchOpacityRight','touchOpacityUtility'])if(!(key in d))d[key]=clone(defaults[key]);
             for(const key of Object.keys(defaults))if(!(key in d))throw Error((translateUI("備份缺少 ")+String(key)+"。"));
             MacroBackup.validate({format:'better-xcloud-macros',version:1,macros:[1,2,3,4,5,6].map(slot=>({slot,...d.macros?.[slot]}))});
             for(let s=1;s<=6;s++){
@@ -1113,6 +1118,11 @@
             this.languageSelect.onchange=()=>{const old=this.p.language;this.p.language=this.languageSelect.value;
                 if(!this.config.save()){this.p.language=old;this.languageSelect.value=old;return;}
                 this.app.setLanguage(this.p.language);};
+            this.backgroundSelect=this.selectSetting(page,()=>translateUI('背景繼續播放巨集'),'backgroundMacro',[[false,()=>translateUI('關閉（離開視窗即停止）')],[true,()=>translateUI('開啟（保留巨集播放）')]]);
+            this.backgroundSelect.onchange=()=>{const previous=this.p.backgroundMacro;this.p.backgroundMacro=this.backgroundSelect.value==='true';
+                if(!this.config.save()){this.p.backgroundMacro=previous;this.backgroundSelect.value=String(previous);return;}
+                if(this.app.backgrounded&&!this.p.backgroundMacro)this.app.suspend();};
+            page.append(el('div','hint',()=>translateUI('僅保留已啟動的巨集播放；錄製、手動輸入、連發、鎖定與 AFK 仍停止。背景計時可能被瀏覽器降頻；最小化、休眠或串流暫停時無法保證遊戲收到輸入。')));
             this.selectSetting(page,()=>translateUI('連發間隔'),'delay',[100,200,500,1000,2000,3000,5000,10000].map(v=>[v,()=>(String(v/1000)+translateUI(" 秒"))]),()=>this.app.auto.restart());
             this.selectSetting(page,()=>translateUI('雙擊連發／三擊鎖定'),'comboTaps',[[false,()=>translateUI('關閉（防誤觸）')],[true,()=>translateUI('開啟')]]);
             this.selectSetting(page,()=>translateUI('AFK 擺頭幅度'),'afkAmp',[.1,.15,.2,.25,.3,.4,.5].map(v=>[v,`${Math.round(v*100)}%`]));
@@ -1500,7 +1510,7 @@
             this.select(safety,()=>translateUI('急停鍵'),keyValues,this.p.emergencyKey,v=>this.attempt(this.shortcutMessage,()=>{if(this.p.macroKeys.includes(v))throw Error(translateUI('急停不可與巨集快捷鍵相同。'));this.saveChange(()=>this.p.emergencyKey=v);}));
             this.number(safety,()=>translateUI('手動長按上限（秒，0＝關閉）'),this.p.holdTimeout,0,600,1,v=>this.attempt(this.shortcutMessage,()=>this.saveChange(()=>this.p.holdTimeout=v)));
             this.number(safety,()=>translateUI('巨集播放上限（秒，0＝關閉）'),this.p.playbackLimit,0,3600,1,v=>this.attempt(this.shortcutMessage,()=>this.saveChange(()=>this.p.playbackLimit=v)));
-            safety.append(el('div','hint',()=>translateUI('長按保護只限制手動觸控按鍵／油門，不限制刻意鎖定或連發。失焦、隱藏分頁與離線時會全停；全螢幕切換會取消觸控操作。')));return page;
+            safety.append(el('div','hint',()=>translateUI('長按保護只限制手動觸控按鍵／油門，不限制刻意鎖定或連發。失焦或隱藏分頁時依「背景繼續播放巨集」設定處理；離線或離開頁面時全停。全螢幕切換會取消觸控操作。')));return page;
         }
         editorPage() {
             const c=this.card(()=>translateUI('巨集時間軸編輯器'));this.editorMessage=this.message(c);
@@ -1676,8 +1686,9 @@
         }
         bindEvents() {
             window.addEventListener('keydown',e=>{if(e.code==='F2'&&!e.repeat&&!e.composedPath().some(n=>n?.matches?.('input,select,textarea,[contenteditable=true]'))){e.preventDefault();this.shortcut();}},{signal:this.signal});
-            window.addEventListener('blur',()=>this.suspend(),{signal:this.signal});
-            document.addEventListener('visibilitychange',()=>{if(document.hidden)this.suspend();},{signal:this.signal});
+            window.addEventListener('blur',()=>this.leaveForeground(),{signal:this.signal});
+            window.addEventListener('focus',()=>{if(!document.hidden)this.returnForeground();},{signal:this.signal});
+            document.addEventListener('visibilitychange',()=>{if(document.hidden)this.leaveForeground();else if(document.hasFocus())this.returnForeground();},{signal:this.signal});
             window.addEventListener('pagehide',()=>this.suspend(),{signal:this.signal});
             window.addEventListener('offline',()=>{this.suspend();this.notice(translateUI('網路已離線，已釋放所有虛擬輸入。'));},{signal:this.signal});
             window.addEventListener('resize',()=>{this.pointers.cancelAll();this.panel.refresh();this.viewer.resize();this.racingView.resize();},{signal:this.signal});
@@ -1701,13 +1712,40 @@
         manualStart() {this.macro.stopPlayback();this.manualUntil=this.clock()+2500;this.override=false;}
         vibrate(pattern) {try{navigator.vibrate?.(pattern);}catch{}}
         stopAll() {
-            this.macro.stop();this.pointers.cancelAll();this.panel?.cancelTaps();this.auto.stop();this.racing.stop();this.input.clearAll();
+            this.cancelBackgroundPump();this.macro.stop();this.pointers.cancelAll();this.panel?.cancelTaps();this.auto.stop();this.racing.stop();this.input.clearAll();
             this.lastRaceContact=-Infinity;this.panelPointers.clear();this.panelWakeUntil=-Infinity;
             if(this.panel)this.updatePanelFade(this.clock());
             this.panel?.refreshStatus();
             this.shortcuts?.blocked.clear();this.shortcuts?.holdSince.clear();
         }
-        suspend() {this.stopAll();this.override=false;this.closePopup();this.updateVisibility();}
+        cancelBackgroundPump() {clearTimeout(this.backgroundTimer);this.backgroundTimer=null;}
+        returnForeground() {this.backgrounded=false;this.cancelBackgroundPump();}
+        leaveForeground() {
+            this.backgrounded=true;
+            if(!this.config.prefs.backgroundMacro||!this.macro.playing){this.suspend();return;}
+            // Preserve only the macro source; never retain a finger, AFK or automated hold.
+            this.pointers.cancelAll();this.panel.cancelTaps();this.auto.stop();this.racing.stop();
+            for(const key of [...this.input.sources.keys()])if(key!=='macro')this.input.clear(key);
+            this.panelPointers.clear();this.comboSince=null;this.comboFired=false;
+            this.shortcuts?.blocked.clear();this.shortcuts?.holdSince.clear();
+            this.override=false;this.closePopup();this.updateVisibility();this.panel.refreshStatus();
+            this.scheduleBackgroundPump();
+        }
+        scheduleBackgroundPump() {
+            this.cancelBackgroundPump();
+            if(this.destroyed||!this.backgrounded||!this.config.prefs.backgroundMacro||!this.macro.playing)return;
+            this.backgroundTimer=setTimeout(()=>{
+                this.backgroundTimer=null;
+                if(this.destroyed||!this.backgrounded||!this.config.prefs.backgroundMacro||!this.macro.playing)return;
+                const now=this.clock(),limit=this.config.prefs.playbackLimit;
+                if(limit&&now-this.macro.runStart>=limit*1000){this.macro.stop();this.notice(translateUI('巨集已達播放時間上限，已停止。'));}
+                else this.macro.tick(now);
+                this.virtual.sync(this.virtual.readPhysical());
+                this.scheduleBackgroundPump();
+            },30);
+        }
+        suspend() {this.cancelBackgroundPump();this.stopAll();this.override=false;this.closePopup();this.updateVisibility();}
+
         changeModeAfterRestore() {
             const p=this.config.prefs;
             this.panel.root.style.left=p.gameMode==='racing'?'15px':p.panelPos?.x||'15px';
