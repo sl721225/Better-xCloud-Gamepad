@@ -3,7 +3,7 @@
 // @homepageURL https://github.com/sl721225/CloudPad-Studio
 // @supportURL  https://github.com/sl721225/CloudPad-Studio/issues
 // @namespace    http://tampermonkey.net/
-// @version      15.6.1
+// @version      15.6.2
 // @updateURL    https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js
 // @downloadURL  https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
@@ -15,7 +15,7 @@
 // ==/UserScript==
 
 /*
- * v15.6.1 — 修正前段等待拉長上一個按鍵，加入真正的空白等待與等待軌道。
+ * v15.6.2 — 修正前段等待拉長上一個按鍵，加入真正的空白等待與等待軌道。
  * 沿用既有 namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -26,7 +26,7 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.6.1';
+    const VERSION = '15.6.2';
     const APP_NAME = 'CloudPad Studio (Dev)';
     const UPDATE_CHANNEL='dev';
     const DEV_SCRIPT_URL='https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js';
@@ -412,6 +412,8 @@
     Object.assign(EN,{"動作時間軸": "Action timeline", "縮小": "Fit", "放大": "Zoom in", "再放大": "Zoom further", "拖長條移動時間，拖右端改持續時間；重疊表示同時操作。": "Drag a bar to move it; drag its right edge to change duration. Overlapping bars play together.", "拖曳持續時間": "Resize duration", "新增動作以建立時間軸。": "Add an action to create a timeline.", "搖桿百分比": "Stick percentage", "油門／煞車百分比": "Trigger percentage", "百分比減少 1": "Decrease percentage by 1", "百分比增加 1": "Increase percentage by 1", "負＝左 · 0＝回中 · 正＝右": "Negative = left · 0 = center · positive = right", "負＝上 · 0＝回中 · 正＝下": "Negative = up · 0 = center · positive = down", "0＝放開 · 100＝全按": "0 = released · 100 = fully pressed", "持續時間必須大於零，結束不得超過 24 小時。": "Duration must be positive and end within 24 hours.", "此按鍵後面已有其他動作，請縮短時間或開啟連同後續一起移動。": "This control has a later action. Shorten this action or enable moving subsequent actions.", "結束不得超過 24 小時。": "The end must be within 24 hours."});
     Object.assign(EN,{'＋ 同時新增':'+ Add simultaneous action','事件較多，時間軸顯示目前頁面的動作；使用下方翻頁查看其餘動作。':'For large recordings, the timeline shows the current page. Use the page controls below to inspect more actions.'});
     Object.assign(EN,{"等待": "Wait", "空白等待": "Neutral wait", "插入空白等待": "Insert neutral wait", "在此動作前留白；跨越等待的長按會先放開，等待後再繼續。": "Insert a neutral interval before this action. Holds crossing the interval are released, then resumed.", "等待時間必須是非負數。": "Wait time must be non-negative.", "等待時間必須大於零，總時長不得超過 24 小時。": "Wait time must be positive and the total must be within 24 hours."});
+    Object.assign(EN,{"前段間隔": "Gap / overlap", "間隔正值＝等待，負值＝重疊。編輯期間以前段動作為固定參考；開始時間與間隔會同步更新。": "Positive gap = wait; negative = overlap. The preceding actions stay the reference while editing. Start and gap update together.", "此動作已變更，請重新選取。": "This action changed. Select it again.", "同一按鍵或軸的動作不能重疊；請調整開始時間或持續時間。": "Actions on the same button or axis cannot overlap. Adjust the start or duration."});
+    EN['欄位已修正，尚未儲存。']='Fields corrected; not saved yet.';
     const EN_KEYS = new Map(Object.entries(EN).map(([zh,en])=>[en,zh]));
     let uiLanguage='zh-TW',activeI18n=null;
     const translateUI = text => {if(typeof text==='function')return translateUI(text());if(typeof text!=='string')return text;const key=EN_KEYS.get(text)||text;return uiLanguage==='en'?(EN[key]??key):key;};
@@ -861,19 +863,37 @@
             const e={t:time,type:action.start.type,id:action.start.id,val:0},at=action.boundary?this.data.events.indexOf(action.boundary):-1;
             if(at<0)this.data.events.push(e);else this.data.events.splice(at,0,e);this.implicitEnds.delete(action.start);action.end=e;return e;
         }
-        shiftActions(threshold,delta,except) {
-            // Move whole later actions, never the release of a previous hold sharing the boundary.
-            const events=new Set(),implicit=[];
-            for(const a of this.actions())if(a.start!==except&&a.start.t>=threshold){events.add(a.start);if(a.end)events.add(a.end);if(this.implicitEnds.has(a.start))implicit.push(a.start);}
-            for(const e of events)e.t+=delta;
-            for(const e of implicit)this.implicitEnds.set(e,this.implicitEnds.get(e)+delta);
+        current(action) {
+            if(action.raw)return action;const found=this.actions().find(a=>a.start===action.start);
+            if(!found)throw Error(translateUI('此動作已變更，請重新選取。'));Object.assign(action,found);return action;
         }
-        waitAnchor(action) {
-            let end=0;for(const a of this.actions()){if(a.start===action.start)break;end=Math.max(end,a.held?this.endTime(a):a.start.t);}return end;
+        atomic(action,edit) {
+            const events=[...this.data.events],values=new Map(events.map(e=>[e,{...e}])),ends=new Map(this.implicitEnds),tail=this.tail,total=this.data.duration,old={...action};
+            try{return edit();}catch(error){for(const [e,value] of values)Object.assign(e,value);this.data.events=events;this.implicitEnds=ends;this.tail=tail;this.data.duration=total;Object.assign(action,old);throw error;}
         }
-        waitBefore(action,value,shift=true) {
-            if(!Number.isFinite(value)||value<0)throw Error(translateUI('等待時間必須是非負數。'));
-            this.move(action,this.waitAnchor(action)+value,shift);
+        freezeBoundaries(starts) {
+            for(const a of this.actions())if(a.boundary&&starts.has(a.boundary)&&!starts.has(a.start))this.ensureEnd(a,a.boundary.t);
+        }
+        shiftActions(threshold,delta,except,selectedMoving=false,protectedStarts=[]) {
+            const protectedSet=new Set(protectedStarts),selectedIndex=this.data.events.indexOf(except),later=this.actions().filter(a=>a.start!==except&&!protectedSet.has(a.start)&&a.start.t>=threshold&&(!selectedMoving||a.start.t>threshold||a.index>selectedIndex)),starts=new Set(later.map(a=>a.start)),events=new Set(),implicit=[];
+            if(selectedMoving)starts.add(except);this.freezeBoundaries(starts);
+            for(const a of later){events.add(a.start);if(a.end)events.add(a.end);if(this.implicitEnds.has(a.start))implicit.push(a.start);}
+            for(const e of events)e.t+=delta;for(const e of implicit)this.implicitEnds.set(e,this.implicitEnds.get(e)+delta);
+        }
+        checkOverlap(action,start,end,threshold,delta,shift,moving=false,protectedStarts=[]) {
+            if(!action.held)return;
+            for(const a of this.actions())if(a.held&&a.start!==action.start&&a.start.type===action.start.type&&a.start.id===action.start.id){
+                const offset=shift&&!protectedStarts.includes(a.start)&&a.start.t>=threshold&&(!moving||a.start.t>threshold||a.index>this.data.events.indexOf(action.start))?delta:0,from=a.start.t+offset,to=this.endTime(a)+offset;
+                if(start<to-1e-7&&end>from+1e-7)throw Error(translateUI('同一按鍵或軸的動作不能重疊；請調整開始時間或持續時間。'));
+            }
+        }
+        waitAnchor(action,references=null) {
+            let end=0;const rows=this.actions();if(references){const wanted=new Set(references);for(const a of rows)if(wanted.has(a.start))end=Math.max(end,a.held?this.endTime(a):a.start.t);return end;}
+            for(const a of rows){if(a.start===action.start)break;end=Math.max(end,a.held?this.endTime(a):a.start.t);}return end;
+        }
+        waitBefore(action,value,shift=true,references=null) {
+            if(!Number.isFinite(value))throw Error(translateUI('等待時間必須是非負數。'));
+            this.move(action,this.waitAnchor(action,references)+value,shift,references||[]);
         }
         insertWait(time,value) {
             if(!Number.isFinite(time)||!Number.isFinite(value)||time<0||time>this.data.duration||value<=0||this.data.duration+value>86400000)throw Error(translateUI('等待時間必須大於零，總時長不得超過 24 小時。'));
@@ -890,21 +910,25 @@
             this.data.events=[...extra,...this.data.events].sort((a,b)=>a.t-b.t);
             this.tail=Math.max(0,total+value-this.last());this.sync();
         }
-        duration(action,value,shift=true) {
+        duration(action,value,shift=true,protectedStarts=[]) {return this.atomic(action,()=>{this.current(action);return this.changeDuration(action,value,shift,protectedStarts);});}
+        changeDuration(action,value,shift=true,protectedStarts=[]) {
             const oldEnd=this.endTime(action),oldTotal=this.data.duration,implicit=!action.end&&!action.boundary,delta=action.start.t+value-oldEnd;
             if(!Number.isFinite(value)||value<=0||action.start.t+value>86400000)throw Error(translateUI('持續時間必須大於零，結束不得超過 24 小時。'));
             if(!shift&&action.next&&action.start.t+value>action.next.t)throw Error(translateUI('此按鍵後面已有其他動作，請縮短時間或開啟連同後續一起移動。'));
             if(shift&&Math.max(this.last()+delta,action.start.t+value)+this.tail>86400000)throw Error(translateUI('結束不得超過 24 小時。'));
-            if(shift)this.shiftActions(oldEnd,delta,action.start);
-            this.ensureEnd(action,action.start.t+value).t=action.start.t+value;
+            this.checkOverlap(action,action.start.t,action.start.t+value,oldEnd,delta,shift,false,protectedStarts);
+            this.ensureEnd(action,oldEnd);if(shift)this.shiftActions(oldEnd,delta,action.start,false,protectedStarts);
+            action.end.t=action.start.t+value;
             if(implicit)this.tail=Math.max(0,(shift?oldTotal+delta:oldTotal)-this.last());this.sync();
         }
-        move(action,time,shift=true) {
+        move(action,time,shift=true,protectedStarts=[]) {return this.atomic(action,()=>{this.current(action);return this.changeStart(action,time,shift,protectedStarts);});}
+        changeStart(action,time,shift=true,protectedStarts=[]) {
             const old=action.start.t,oldEnd=this.endTime(action),delta=time-old,held=action.held??!!action.end,implicit=held&&!action.end&&!action.boundary;
             if(!Number.isFinite(time)||time<0||(held?oldEnd+delta:time)>86400000||(shift&&this.last()+this.tail+delta>86400000))throw Error(translateUI('結束不得超過 24 小時。'));
             if(!shift&&action.next&&oldEnd+delta>action.next.t)throw Error(translateUI('此按鍵後面已有其他動作，請縮短時間或開啟連同後續一起移動。'));
+            this.checkOverlap(action,time,held?oldEnd+delta:time,old,delta,shift,true,protectedStarts);
             if(held&&!action.end){this.ensureEnd(action,oldEnd);if(implicit)this.tail=Math.max(0,this.data.duration-this.last());}
-            if(shift)this.shiftActions(old,delta,action.start);
+            if(shift)this.shiftActions(old,delta,action.start,true,protectedStarts);else this.freezeBoundaries(new Set([action.start]));
             action.start.t=time;if(action.end)action.end.t+=delta;else if(this.implicitEnds.has(action.start))this.implicitEnds.set(action.start,Math.max(time,this.implicitEnds.get(action.start)));this.sync();
         }
         finalize() {for(const [start,time] of [...this.implicitEnds])if(this.data.events.includes(start))this.ensureEnd({start,end:null},time);this.sync();return this.data;}
@@ -1637,10 +1661,13 @@
         }
         mountMacroWindow() {
             const css=el('style');css.textContent=`
-            .macro-window{position:fixed;z-index:20;pointer-events:auto;width:min(600px,calc(100vw - 16px));max-height:calc(100dvh - 16px);background:#111c29f5;color:#e2edf5;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 40px #0008;overflow:auto;padding:10px;box-sizing:border-box;font:12px/1.4 system-ui}
+            .macro-window{position:fixed;z-index:20;pointer-events:auto;width:min(900px,calc(100vw - 16px));max-height:calc(100dvh - 16px);background:#111c29f5;color:#e2edf5;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 40px #0008;overflow:auto;padding:10px;box-sizing:border-box;font:12px/1.4 system-ui}
             .float-header{display:flex;align-items:center;gap:6px;position:sticky;top:-10px;background:#111c29;z-index:3;padding:6px 0}.float-grip{cursor:move;touch-action:none;user-select:none;padding:5px 12px;color:#9dc9e8}.float-header .float-grip{flex:1}.macro-window .setting input{max-width:65%}.macro-window .slots{display:flex;gap:3px}.macro-window .slots button{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis}.macro-window .v15-card{padding:7px}.macro-window button{touch-action:manipulation}.macro-window .edit-step{border:1px solid var(--line);border-radius:8px;padding:8px;margin:7px 0}.macro-window .edit-step .row{flex-wrap:wrap;gap:4px}.edit-value{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:6px 0}.edit-value input[type=range]{width:145px;padding:0}.edit-time{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:5px 0}.edit-time input{width:85px}.field-error{color:#ff9a9a;font-size:11px}.edit-invalid{outline:2px solid #ff6868!important}.editor-alert{position:sticky;top:34px;z-index:2;background:#4a1823;color:#ffdbe1;padding:8px;border:1px solid #ff6868;border-radius:6px}.editor-alert:empty{display:none}.editor-alert[data-success=true]{background:#193c2d;border-color:#74efb4;color:#baffdc}.editor-summary{display:block;font-weight:bold;margin:6px 0}.quickbar{max-height:calc(100dvh - 16px);box-sizing:border-box}.quickbar .float-grip{text-align:center;padding:2px}.quickbar .on{border-color:#65e9af}
 
             .macro-timeline{scroll-margin-top:50px;margin:10px 0;padding:8px;background:#09131e;border:1px solid var(--line);border-radius:8px}.timeline-scroll{overflow:auto;max-height:310px;padding:8px 0;overscroll-behavior:contain}.timeline-ruler{position:relative;height:22px;color:#93a4b6;font:10px system-ui}.timeline-ruler>span{position:absolute;transform:translateX(-50%);white-space:nowrap}.timeline-lane{display:flex;align-items:center;height:46px;border-bottom:1px solid #ffffff15}.timeline-label{position:sticky;left:0;z-index:2;flex:none;width:66px;background:#09131e;color:#c2d7e8;font-size:11px}.timeline-track{position:relative;height:40px;flex:none;background:repeating-linear-gradient(90deg,#ffffff0a 0,#ffffff0a 1px,transparent 1px,transparent 20%)}.timeline-bar{position:absolute;top:5px;height:30px;display:flex;align-items:center;border:1px solid #71baff;border-radius:5px;background:#24466b;cursor:grab;color:#ecf6ff;box-sizing:border-box;overflow:visible;font:10px system-ui;user-select:none}.timeline-bar>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 5px;pointer-events:none}.timeline-bar.selected{outline:2px solid #74efb4;background:#235341}.timeline-bar.point{background:#63512c;border-color:#f0c56e}.timeline-resize{position:absolute;right:0;top:0;height:100%;width:18px;display:grid;place-items:center;background:#ffffff18;cursor:ew-resize;border-left:1px solid #ffffff40}.timeline-wait{position:absolute;top:7px;height:26px;border:1px dashed #d5b569;color:#ffe4a4;background:repeating-linear-gradient(135deg,#76602a33 0,#76602a33 5px,#76602a66 5px,#76602a66 10px);font:10px/24px system-ui;text-align:center;overflow:hidden;white-space:nowrap}.percent-input{width:64px!important;text-align:center}.edit-value input[type=range]{width:100%;margin:5px 0}.macro-window .edit-step{border-color:#74efb477}
+
+            .edit-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}.edit-heading .row{margin:0}.edit-timings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:6px 0}.edit-timings .edit-time{margin:0;display:grid;grid-template-columns:auto 28px minmax(50px,1fr) 28px;gap:4px}.edit-timings .edit-time>input{width:100%;min-width:0}.edit-timings .edit-time>button{padding:5px}.edit-timings .field-error{grid-column:1/-1}.edit-timings .edit-time>.meta{grid-column:1/-1}.edit-options{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:start}.edit-options .edit-value{margin:0;gap:4px}.edit-value .field-error{flex-basis:100%;min-height:15px}.edit-reference{margin:4px 0}.edit-output .duration-presets{margin-bottom:5px}.edit-output .edit-value input[type=range]{width:120px;flex:1;min-width:75px;margin:3px 0}.edit-output .row{gap:3px}.edit-output .row button{padding:5px 7px}
+            @media(max-width:700px){.edit-timings{grid-template-columns:repeat(2,minmax(0,1fr))}.edit-timings .edit-time{grid-template-columns:28px minmax(50px,1fr) 28px}.edit-timings .edit-time>span:first-child{grid-column:1/-1}.edit-options{grid-template-columns:1fr}.edit-output .edit-value input[type=range]{min-width:120px}.edit-heading{align-items:start}}
             @media(max-width:390px){.macro-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.macro-window{padding:7px}.macro-window .float-header{top:-7px}}
             `;this.app.shadow.append(css);
             this.macroWindow=el('section','macro-window');this.macroWindow.hidden=true;this.macroWindow.setAttribute('role','region');setLabel(this.macroWindow,'aria-label',()=>translateUI('巨集工作室'));
@@ -1649,14 +1676,14 @@
             header.append(grip,button('?',()=>help.hidden=!help.hidden),button(()=>translateUI('重設位置'),()=>{this.p.macroWindowPos=null;this.app.config.save();this.placeFloating(this.macroWindow,'macroWindowPos');}),button('×',()=>this.toggleMacroWindow(false)));
             this.macroWindow.append(header,help,this.panel.pages.macro);this.app.shadow.append(this.macroWindow);this.panel.pages.macro.hidden=false;
             this.bindFloating(grip,this.macroWindow,'macroWindowPos');
-            window.addEventListener('resize',()=>{this.fitFloating(this.macroWindow,'macroWindowPos');this.fitFloating(this.quickbar,'quickbarPos',true);},{signal:this.app.signal});
+            window.addEventListener('resize',()=>{this.fitFloating(this.macroWindow,'macroWindowPos');this.fitFloating(this.quickbar,'quickbarPos',true);this.refreshTimeline();},{signal:this.app.signal});
         }
         toggleMacroWindow(open=this.macroWindow.hidden) {
             this.macroWindow.hidden=!open;if(open){this.panel.pages.macro.hidden=false;this.placeFloating(this.macroWindow,'macroWindowPos');this.panel.refreshStatus();}
             this.panel.macroQuick.classList.toggle('on',open);this.panel.macroQuick.setAttribute('aria-expanded',String(open));
         }
         placeFloating(node,key,snap=false) {
-            if(!node)return;const p=this.p[key];node.style.right='auto';node.style.left=p?.x||`${snap?Math.max(8,innerWidth-145):Math.max(8,(innerWidth-600)/2)}px`;node.style.top=p?.y||(snap?'35%':'40px');this.fitFloating(node,key,snap);
+            if(!node)return;const p=this.p[key];node.style.right='auto';node.style.left=p?.x||`${snap?Math.max(8,innerWidth-145):Math.max(8,(innerWidth-(node.offsetWidth||900))/2)}px`;node.style.top=p?.y||(snap?'35%':'40px');this.fitFloating(node,key,snap);
         }
         fitFloating(node,key,snap=false) {
             if(!node||node.hidden)return;this.app.clampElement(node);
@@ -1669,23 +1696,26 @@
             const c=this.card(()=>translateUI('巨集時間軸編輯器'));this.editorMessage=this.message(c);this.editorMessage.classList.add('editor-alert');this.editorMessage.setAttribute('role','alert');
             c.append(button(()=>translateUI('編輯此巨集'),()=>{try{
                 this.requireIdle();if(this.draft){if(this.editSlot===this.app.macro.slot){this.renderEditor();return;}if(!ask(translateUI('捨棄目前草稿並重新載入？')))return;}
-                this.editSlot=this.app.macro.slot;this.model=new MacroDraft(this.p.macros[this.editSlot]);this.draft=this.model.data;this.editPage=0;this.editMode=this.p.macroEditModes[this.editSlot];this.shiftFollowing=true;this.editErrors=new Map();setText(this.editorMessage,()=>'');this.renderEditor();this.timelineMount?.scrollIntoView({block:'start'});this.panel.macroName.value=this.draft.name;this.panel.refreshStatus();
+                this.editSlot=this.app.macro.slot;this.model=new MacroDraft(this.p.macros[this.editSlot]);this.draft=this.model.data;this.editPage=0;this.editMode=this.p.macroEditModes[this.editSlot];this.shiftFollowing=true;this.editErrors=new Map();this.waitContext=null;this.editorMessage.style.minHeight='';setText(this.editorMessage,()=>'');this.renderEditor();this.timelineMount?.scrollIntoView({block:'start'});this.panel.macroName.value=this.draft.name;this.panel.refreshStatus();
             }catch(e){setText(this.editorMessage,()=>translateUI(e.message));}}));
             this.editorBody=el('div');c.append(this.editorBody);
             this.speedSelect=this.select(c,()=>translateUI('播放速度'),[[.25,'0.25×'],[.5,'0.5×'],[.75,'0.75×'],[1,'1×'],[1.5,'1.5×'],[2,'2×'],[3,'3×']],this.p.macroSpeed,v=>this.attempt(this.editorMessage,()=>this.saveChange(()=>this.p.macroSpeed=Number(v))));return c;
         }
-        editorRows() {return this.editMode==='fine'?this.draft.events.map((e,i)=>({start:e,end:null,index:i})):this.model.actions();}
+        eventKey(event) {this.editEventKeys??=new WeakMap();if(!this.editEventKeys.has(event))this.editEventKeys.set(event,`event${this.editEventSequence=(this.editEventSequence||0)+1}`);return this.editEventKeys.get(event);}
+        editorReady() {if(!this.editorMessage.textContent)return;this.editorMessage.style.minHeight=`${this.editorMessage.getBoundingClientRect().height}px`;this.editorMessage.dataset.success='true';setText(this.editorMessage,()=>translateUI('欄位已修正，尚未儲存。'));}
+        referencesFor(event) {return this.waitContext?.event===event?this.waitContext.references:[];}
+        editorRows() {return this.editMode==='fine'?this.draft.events.map((e,i)=>({start:e,end:null,index:i,raw:true})):this.model.actions();}
         editorTotal() {this.model.sync();if(this.totalLabel)setText(this.totalLabel,()=>`${translateUI('總時長')} ${(this.draft.duration/1000).toFixed(1)} ${translateUI('秒')}`);}
         editorNumber(parent,label,owner,field,value,min,max,commit,read=()=>value) {
             const wrap=el('div','edit-time'),input=el('input'),error=el('span','field-error');input.type='number';input.min=min;input.max=max;input.step='any';input.required=true;
-            const key=owner===this.model?'tail':`${this.draft.events.indexOf(owner)}:${field}`;
+            const key=owner===this.model?'tail':`${this.eventKey(owner)}:${field}`;
             // Raw invalid text survives page/mode changes. Untouched formatted values never overwrite recorded precision.
-            input.value=this.editErrors.get(key)?.raw??(this.editMode==='fine'?String(value):(value>0&&value<.1?.1:value).toFixed(1));setLabel(input,'aria-label',()=>translateUI(label));
+            input.value=this.editErrors.get(key)?.raw??(this.editMode==='fine'?String(value):(field==='hold'&&value>0&&value<.1?.1:value).toFixed(1));setLabel(input,'aria-label',()=>translateUI(label));
             const validate=()=>{const bad=input.value===''||!input.checkValidity();input.classList.toggle('edit-invalid',bad);input.setAttribute('aria-invalid',String(bad));setText(error,()=>bad?`${translateUI('有效範圍')} ${min}–${max} ${translateUI('秒')}`:'');
-                if(bad)this.editErrors.set(key,{raw:input.value,owner,field,label});else{this.editErrors.delete(key);if(!this.editErrors.size)setText(this.editorMessage,()=>'');}return !bad;};
-            input.oninput=validate;input.onchange=()=>{if(validate()){try{commit(Number(input.value));}catch(error){this.editErrors.set(key,{raw:input.value,owner,field,label});input.classList.add('edit-invalid');setText(this.editorMessage,()=>translateUI(error.message));return;}this.editorTotal();this.refreshTimeline();for(const b of this.editorTimeBindings||[]){if(b.input!==input&&!this.editErrors.has(b.key)){const v=b.read();b.input.value=this.editMode==='fine'?String(v):(v>0&&v<.1?.1:v).toFixed(1);}}}};
+                if(bad)this.editErrors.set(key,{raw:input.value,owner,field,label});else{this.editErrors.delete(key);if(!this.editErrors.size)this.editorReady();}return !bad;};
+            input.oninput=validate;input.onchange=()=>{if(validate()){try{commit(Number(input.value));}catch(error){this.editErrors.set(key,{raw:input.value,owner,field,label});input.classList.add('edit-invalid');setText(this.editorMessage,()=>translateUI(error.message));return;}this.editorTotal();this.refreshTimeline();for(const b of this.editorTimeBindings||[]){if(b.input!==input&&!this.editErrors.has(b.key)){const v=b.read();b.input.value=this.editMode==='fine'?String(v):(b.field==='hold'&&v>0&&v<.1?.1:v).toFixed(1);}}}};
             const adjust=delta=>{const current=Number(input.value);input.value=String(Math.round(clamp((Number.isFinite(current)?current:value)+delta,min,max)*1000)/1000);input.onchange();};
-            wrap.append(el('span','',()=>translateUI(label)),button('−',()=>adjust(this.editMode==='fine'?-.001:-.1)),input,button('+',()=>adjust(this.editMode==='fine'?.001:.1)),error);parent.append(wrap);if(this.editMode==='simple'&&value>0&&value<.1)wrap.append(el('span','meta',()=>translateUI('短按（原始時間保留）')));if(this.editErrors.has(key))validate();this.editorTimeBindings.push({input,key,read});return input;
+            wrap.append(el('span','',()=>translateUI(label)),button('−',()=>adjust(this.editMode==='fine'?-.001:-.1)),input,button('+',()=>adjust(this.editMode==='fine'?.001:.1)),error);parent.append(wrap);if(this.editMode==='simple'&&field==='hold'&&value>0&&value<.1)wrap.append(el('span','meta',()=>translateUI('短按（原始時間保留）')));if(this.editErrors.has(key))validate();this.editorTimeBindings.push({input,key,read,field});return input;
         }
         repeatButton(label,change) {
             const b=button(label,()=>change()),clear=()=>{clearTimeout(timer);clearInterval(repeat);timer=repeat=null;};let timer=null,repeat=null;
@@ -1699,9 +1729,9 @@
             const axis=event.type==='axis',label=axis?'搖桿幅度':'按壓深度',min=axis?-100:0;
             const slider=el('input');slider.type='range';slider.min=min;slider.max=100;slider.step=1;slider.value=event.val*100;setLabel(slider,'aria-label',()=>translateUI(label));
             const number=el('input');number.type='number';number.min=min;number.max=100;number.step=1;number.value=Math.round(event.val*100);number.classList.add('percent-input');setLabel(number,'aria-label',()=>translateUI(axis?'搖桿百分比':'油門／煞車百分比'));
-            const error=el('span','field-error'),key=`${this.draft.events.indexOf(event)}:value`;
+            const error=el('span','field-error'),key=`${this.eventKey(event)}:value`;
             if(this.editErrors.has(key)){number.value=this.editErrors.get(key).raw;number.classList.add('edit-invalid');}
-            const apply=percent=>{event.val=clamp(percent,min,100)/100;slider.value=event.val*100;number.value=Math.round(event.val*100);number.classList.remove('edit-invalid');number.setAttribute('aria-invalid','false');this.editErrors.delete(key);setText(error,()=>'');if(!this.editErrors.size)setText(this.editorMessage,()=>'');this.updateTimelineLabels?.();};
+            const apply=percent=>{event.val=clamp(percent,min,100)/100;slider.value=event.val*100;number.value=Math.round(event.val*100);number.classList.remove('edit-invalid');number.setAttribute('aria-invalid','false');this.editErrors.delete(key);setText(error,()=>'');if(!this.editErrors.size)this.editorReady();this.updateTimelineLabels?.();};
             const validate=()=>{const bad=number.value===''||!number.checkValidity();number.classList.toggle('edit-invalid',bad);number.setAttribute('aria-invalid',String(bad));setText(error,()=>bad?`${translateUI('有效範圍')} ${min}–100%`:'');if(bad)this.editErrors.set(key,{raw:number.value,owner:event,field:'value'});else this.editErrors.delete(key);return !bad;};
             number.oninput=validate;number.onchange=()=>{if(validate())apply(Number(number.value));};slider.oninput=()=>apply(Number(slider.value));
             const less=this.repeatButton('−',()=>apply(Math.round(event.val*100)-1)),more=this.repeatButton('+',()=>apply(Math.round(event.val*100)+1));setLabel(less,'aria-label',()=>translateUI('百分比減少 1'));setLabel(more,'aria-label',()=>translateUI('百分比增加 1'));
@@ -1712,7 +1742,7 @@
         renderTimeline(parent,rows) {
             const panel=el('div','macro-timeline'),tools=el('div','row');tools.append(el('strong','',()=>translateUI('動作時間軸')));
             for(const [value,label] of [[1,'縮小'],[2,'放大'],[4,'再放大']])tools.append(button(()=>translateUI(label),()=>{this.timelineZoom=value;this.renderEditor();},(this.timelineZoom||1)===value?'on':''));panel.append(tools,el('div','meta',()=>translateUI('拖長條移動時間，拖右端改持續時間；重疊表示同時操作。')));
-            const viewport=el('div','timeline-scroll'),canvas=el('div','timeline-canvas'),duration=Math.max(100,this.draft.duration),width=Math.max(460,Math.min(24000,460*(this.timelineZoom||1))),scale=width/duration;
+            const viewport=el('div','timeline-scroll'),canvas=el('div','timeline-canvas'),duration=Math.max(100,this.draft.duration),width=Math.max(200,Math.min(24000,Math.max(200,parent.clientWidth-84)*(this.timelineZoom||1))),scale=width/duration;
             canvas.style.width=`${width+66}px`;const ruler=el('div','timeline-ruler');ruler.style.marginLeft='66px';
             for(let i=0;i<=5;i++){const t=el('span','',`${(duration*i/5000).toFixed(1)} s`);t.style.left=`${i*width/5}px`;ruler.append(t);}canvas.append(ruler);
             if(rows.length>1000)panel.append(el('div','meta',()=>translateUI('事件較多，時間軸顯示目前頁面的動作；使用下方翻頁查看其餘動作。')));const visible=rows.length>1000?rows.slice(this.editPage*20,(this.editPage+1)*20):rows,channels=new Map();
@@ -1724,7 +1754,7 @@
                     const start=action.start,held=action.held,end=held?this.model.endTime(action):start.t,bar=el('div',`timeline-bar ${held?'held':'point'} ${this.selectedEvent===start?'selected':''}`);bar.tabIndex=0;bar.setAttribute('role','button');
                     bar.style.left=`${start.t*scale}px`;bar.style.width=`${Math.max(held?24:12,(end-start.t)*scale)}px`;bar.dataset.event=String(this.draft.events.indexOf(start));const text=el('span');bar.append(text);this.timelineLabels.push({node:text,action,name});
                     if(held){const handle=el('span','timeline-resize','⋮');setLabel(handle,'aria-label',()=>translateUI('拖曳持續時間'));bar.append(handle);}
-                    const select=()=>{this.selectedEvent=start;this.editPage=Math.floor(rows.indexOf(action)/20);this.renderEditor();};bar.onkeydown=ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();select();}};
+                    const select=()=>{this.waitContext=null;this.selectedEvent=start;this.editPage=Math.floor(rows.indexOf(action)/20);this.renderEditor();};bar.onkeydown=ev=>{if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();select();}};
                     this.app.pointers.bind(bar,event=>{
                         if(this.editErrors.size){setText(this.editorMessage,()=>translateUI('請先修正標紅欄位。'));return null;}
                         const resize=held&&!!event.target.closest('.timeline-resize'),x=event.clientX,old=start.t,length=Math.max(1,end-old);let next=resize?length:old,moved=false;
@@ -1732,7 +1762,7 @@
                             next=resize?clamp(length+delta,1,86400000-old):clamp(old+delta,0,86400000-(held?length:0));
                             if(resize)bar.style.width=`${Math.max(24,next*scale)}px`;else bar.style.left=`${next*scale}px`;
                             setLabel(bar,'title',()=>`${(resize?old:next)/1000} – ${(resize?old+next:next+length)/1000} s`);
-                        },end:(_,cancelled)=>{if(cancelled){this.renderEditor();return;}try{if(moved){if(resize)this.model.duration(action,next,this.shiftFollowing);else this.model.move(action,next,this.shiftFollowing);}this.selectedEvent=start;this.editPage=Math.floor(rows.indexOf(action)/20);this.renderEditor();}catch(error){this.renderEditor();setText(this.editorMessage,()=>translateUI(error.message));}}};
+                        },end:(_,cancelled)=>{if(cancelled){this.renderEditor();return;}try{if(moved){if(resize)this.model.duration(action,next,this.shiftFollowing);else this.model.move(action,next,this.shiftFollowing);}this.waitContext=null;this.selectedEvent=start;this.editPage=Math.floor(rows.indexOf(action)/20);this.renderEditor();}catch(error){this.renderEditor();setText(this.editorMessage,()=>translateUI(error.message));}}};
                     });track.append(bar);
                 }canvas.append(lane);
             }
@@ -1756,23 +1786,26 @@
             if(this.editMode==='simple'&&!rows.some(r=>r.start===this.selectedEvent))this.selectedEvent=rows[this.editPage*pageSize]?.start;this.timelineMount=el('div');body.append(this.timelineMount);this.refreshTimeline();
             for(let r=this.editPage*pageSize;r<Math.min(rows.length,(this.editPage+1)*pageSize);r++){
                 const action=rows[r],e=action.start;if(this.editMode==='simple'&&e!==this.selectedEvent)continue;const card=el('section','edit-step');card.dataset.event=String(this.draft.events.indexOf(e));
-                card.append(el('strong','',()=>`${r+1}. ${e.type==='btn'?LABELS[e.id]:['LS X','LS Y','RS X','RS Y'][e.id]}`));
-                this.editorNumber(card,'開始時間',e,'time',e.t/1000,0,Math.max(0,(86400000-(action.held?this.model.endTime(action)-e.t:0))/1000),v=>this.model.move(action,v*1000,this.editMode==='simple'&&this.shiftFollowing),()=>e.t/1000);
+                const heading=el('div','edit-heading'),timing=el('div','edit-timings'),options=el('div','edit-options'),waitBox=el('div','edit-wait-box'),valueBox=el('div','edit-output');card.append(heading,timing,options);options.append(waitBox,valueBox);heading.append(el('strong','',()=>`${r+1}. ${e.type==='btn'?LABELS[e.id]:['LS X','LS Y','RS X','RS Y'][e.id]}`));
+                this.editorNumber(timing,'開始時間',e,'time',e.t/1000,0,Math.max(0,(86400000-(action.held?this.model.endTime(this.model.current(action))-e.t:0))/1000),v=>this.model.move(action,v*1000,this.editMode==='simple'&&this.shiftFollowing,this.referencesFor(e)),()=>e.t/1000);
                 if(this.editMode==='simple'){
-                    const anchor=this.model.waitAnchor(action);if(e.t>=anchor)this.editorNumber(card,'前段等待',e,'gap',(e.t-anchor)/1000,0,Math.max(0,(86400000-anchor)/1000),v=>this.model.waitBefore(action,v*1000,this.shiftFollowing),()=>Math.max(0,(e.t-this.model.waitAnchor(action))/1000));
+                    if(this.waitContext?.event!==e){const index=rows.findIndex(a=>a.start===e);this.waitContext={event:e,references:rows.slice(0,index).map(a=>a.start)};}
+                    const refs=this.waitContext.references,anchor=()=>this.model.waitAnchor(action,refs);
+                    this.editorNumber(timing,'前段間隔',e,'gap',(e.t-anchor())/1000,-86400,86400,v=>this.model.waitBefore(action,v*1000,this.shiftFollowing,refs),()=> (e.t-anchor())/1000);
+                    card.append(el('div','hint edit-reference',()=>translateUI('間隔正值＝等待，負值＝重疊。編輯期間以前段動作為固定參考；開始時間與間隔會同步更新。')));
                     const waits=el('div','row');waits.append(el('span','meta',()=>translateUI('插入空白等待')));
-                    for(const ms of [100,500,1000])waits.append(button(`+${(ms/1000).toFixed(1)} s`,()=>{if(this.editErrors.size){setText(this.editorMessage,()=>translateUI('請先修正標紅欄位。'));return;}try{this.model.insertWait(e.t,ms);this.editPage=Math.floor(this.editorRows().findIndex(a=>a.start===e)/pageSize);this.renderEditor();}catch(error){setText(this.editorMessage,()=>translateUI(error.message));}}));
-                    card.append(waits,el('div','hint',()=>translateUI('在此動作前留白；跨越等待的長按會先放開，等待後再繼續。')));
+                    for(const ms of [100,500,1000])waits.append(button(`+${(ms/1000).toFixed(1)} s`,()=>{if(this.editErrors.size){setText(this.editorMessage,()=>translateUI('請先修正標紅欄位。'));return;}try{this.model.insertWait(e.t,ms);this.waitContext=null;this.editPage=Math.floor(this.editorRows().findIndex(a=>a.start===e)/pageSize);this.renderEditor();}catch(error){setText(this.editorMessage,()=>translateUI(error.message));}}));
+                    waitBox.append(waits,el('div','hint',()=>translateUI('在此動作前留白；跨越等待的長按會先放開，等待後再繼續。')));
                 }
                 if(action.held){
-                    this.editorNumber(card,'按住時間',e,'hold',(this.model.endTime(action)-e.t)/1000,.001,Math.max(.001,(86400000-e.t)/1000),v=>this.model.duration(action,v*1000,this.shiftFollowing),()=>(this.model.endTime(action)-e.t)/1000);
-                    const presets=el('div','row');for(const [ms,label] of [[80,'短按'],[100,'0.1 s'],[500,'0.5 s'],[1000,'1.0 s']])presets.append(button(()=>translateUI(label),()=>{const key=`${d.events.indexOf(e)}:hold`;this.editErrors.delete(key);this.model.duration(action,ms,this.shiftFollowing);if(!this.editErrors.size)setText(this.editorMessage,()=>'');this.renderEditor();}));card.append(presets);
+                    this.editorNumber(timing,'按住時間',e,'hold',(this.model.endTime(this.model.current(action))-e.t)/1000,.001,Math.max(.001,(86400000-e.t)/1000),v=>this.model.duration(action,v*1000,this.shiftFollowing,this.referencesFor(e)),()=>(this.model.endTime(this.model.current(action))-e.t)/1000);
+                    const presets=el('div','row');for(const [ms,label] of [[80,'短按'],[100,'0.1 s'],[500,'0.5 s'],[1000,'1.0 s']])presets.append(button(()=>translateUI(label),()=>{const key=`${this.eventKey(e)}:hold`;this.editErrors.delete(key);this.model.duration(action,ms,this.shiftFollowing,this.referencesFor(e));if(!this.editErrors.size)this.editorReady();this.renderEditor();}));presets.classList.add('duration-presets');valueBox.append(presets);
                 }
-                this.editorValue(card,e,action.end);
+                this.editorValue(valueBox,e,action.end);
                 const controls=el('div','row'),kind=el('select');for(const [v,label] of [['btn','按鍵'],['axis','搖桿']]){const o=el('option','',()=>translateUI(label));o.value=v;kind.append(o);}kind.value=e.type;setLabel(kind,'aria-label',()=>translateUI('動作類型'));
                 kind.onchange=()=>{if(this.editErrors.size){kind.value=e.type;return;}e.type=kind.value;e.id=0;e.val=action.held?1:0;if(action.end){action.end.type=e.type;action.end.id=0;action.end.val=0;}this.renderEditor();};
                 const id=el('select');(e.type==='btn'?LABELS:['LS X','LS Y','RS X','RS Y']).forEach((label,i)=>{const o=el('option','',label);o.value=i;id.append(o);});id.value=e.id;setLabel(id,'aria-label',()=>translateUI('按鍵／軸'));id.onchange=()=>{if(this.editErrors.size){id.value=e.id;return;}e.id=Number(id.value);if(action.end)action.end.id=e.id;this.renderEditor();};
-                const del=button(()=>translateUI('刪'),()=>{if(this.editErrors.size){setText(this.editorMessage,()=>translateUI('請先修正標紅欄位。'));return;}this.model.remove(action);this.renderEditor();});controls.append(kind,id,del);card.append(controls);body.append(card);
+                const del=button(()=>translateUI('刪'),()=>{if(this.editErrors.size){setText(this.editorMessage,()=>translateUI('請先修正標紅欄位。'));return;}this.model.remove(action);this.renderEditor();});controls.append(kind,id,del);heading.append(controls);body.append(card);
             }
             const nav=el('div','row'),prev=button(()=>translateUI('上一頁'),()=>{this.editPage--;this.selectedEvent=rows[this.editPage*pageSize]?.start;this.renderEditor();}),next=button(()=>translateUI('下一頁'),()=>{this.editPage++;this.selectedEvent=rows[this.editPage*pageSize]?.start;this.renderEditor();});prev.disabled=this.editPage===0;next.disabled=this.editPage===pages-1;nav.append(prev,el('span','meta',`${this.editPage+1} / ${pages}`),next);body.append(nav);
             if(this.editMode==='fine'){
@@ -1783,8 +1816,8 @@
             if(this.focusError){const error=this.focusError;this.focusError=null;const target=error.owner===this.model?body.querySelector('.edit-invalid'):body.querySelector(`[data-event="${d.events.indexOf(error.owner)}"] .edit-invalid`);target?.scrollIntoView({block:'center'});target?.focus();}
         }
         saveEditor() {
-            this.editorMessage.dataset.success='false';try{
-                this.requireIdle();for(const e of this.draft.events)if(!Number.isFinite(e.t)||e.t<0||e.t>86400000)this.editErrors.set(`${this.draft.events.indexOf(e)}:time`,{raw:String(e.t/1000),owner:e,field:'time'});if(this.model.last()+this.model.tail>86400000)this.editErrors.set('tail',{raw:String(this.model.tail/1000),owner:this.model,field:'tail'});if(this.editErrors.size){const error=this.editErrors.values().next().value;if(error.owner!==this.model&&this.editMode==='simple'&&this.editorRows().some(r=>r.end===error.owner))this.editMode='fine';const rows=this.editorRows(),index=rows.findIndex(r=>r.start===error.owner||r.end===error.owner);this.editPage=Math.floor(Math.max(0,index)/20);this.focusError=error;this.selectedEvent=rows[Math.max(0,index)]?.start;this.renderEditor();setText(this.editorMessage,()=>`${translateUI('尚未儲存：請修正第')} ${Math.max(1,index+1)} ${translateUI('筆標紅欄位。')}`);return;}
+            this.editorMessage.style.minHeight='';this.editorMessage.dataset.success='false';try{
+                this.requireIdle();for(const e of this.draft.events)if(!Number.isFinite(e.t)||e.t<0||e.t>86400000)this.editErrors.set(`${this.eventKey(e)}:time`,{raw:String(e.t/1000),owner:e,field:'time'});if(this.model.last()+this.model.tail>86400000)this.editErrors.set('tail',{raw:String(this.model.tail/1000),owner:this.model,field:'tail'});if(this.editErrors.size){const error=this.editErrors.values().next().value;if(error.owner!==this.model&&this.editMode==='simple'&&this.editorRows().some(r=>r.end===error.owner))this.editMode='fine';const rows=this.editorRows(),index=rows.findIndex(r=>r.start===error.owner||r.end===error.owner);this.editPage=Math.floor(Math.max(0,index)/20);this.focusError=error;this.selectedEvent=rows[Math.max(0,index)]?.start;this.renderEditor();setText(this.editorMessage,()=>`${translateUI('尚未儲存：請修正第')} ${Math.max(1,index+1)} ${translateUI('筆標紅欄位。')}`);return;}
                 this.model.sync();MacroTimeline.normalize(this.draft);if(!ask(`${translateUI('以草稿取代槽位')} ${this.editSlot}？`))return;
                 this.model.finalize();const previousMode=this.p.macroEditModes[this.editSlot];this.p.macroEditModes[this.editSlot]=this.editMode;try{MacroTimeline.save(this.app.config,this.editSlot,this.draft);}catch(error){this.p.macroEditModes[this.editSlot]=previousMode;throw error;}this.draft=null;this.renderEditor();this.panel.refreshStatus();this.syncQuickbar();this.editorMessage.dataset.success='true';setText(this.editorMessage,()=>translateUI('已儲存。'));
             }catch(e){setText(this.editorMessage,()=>translateUI(e.message));}
