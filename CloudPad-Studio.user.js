@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         CloudPad Studio
+// @name         CloudPad Studio (Dev)
 // @homepageURL https://github.com/sl721225/CloudPad-Studio
 // @supportURL  https://github.com/sl721225/CloudPad-Studio/issues
 // @namespace    http://tampermonkey.net/
-// @version      15.4.2
-// @updateURL    https://github.com/sl721225/CloudPad-Studio/releases/latest/download/CloudPad-Studio.user.js
-// @downloadURL  https://github.com/sl721225/CloudPad-Studio/releases/latest/download/CloudPad-Studio.user.js
+// @version      15.4.3
+// @updateURL    https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js
+// @downloadURL  https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
 // @author       You
 // @match        *://*.xbox.com/*
@@ -15,7 +15,7 @@
 // ==/UserScript==
 
 /*
- * v15.4.2 — 背景巨集播放補上串流頁面失焦事件隔離；預設維持關閉。
+ * v15.4.3 — Dev 更新頻道追蹤開發分支固定安裝檔；名稱標示 (Dev)。
  * 沿用既有 namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -26,11 +26,21 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.4.2';
-    const APP_NAME = 'CloudPad Studio';
+    const VERSION = '15.4.3';
+    const APP_NAME = 'CloudPad Studio (Dev)';
+    const UPDATE_CHANNEL='dev';
+    const DEV_SCRIPT_URL='https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js';
 
     // UI strings are separate from user macro/layout names and serialized input data.
     const EN = {
+    "檢查開發版更新": "Check Dev updates",
+    "開啟開發版安裝檔": "Open Dev userscript",
+    "追蹤 v15-development 開發分支，可能包含未完成的修改。自動更新依腳本管理器設定執行；遊戲中不強制重載。": "Tracks the v15-development branch, which may include unfinished changes. Automatic updates follow your userscript manager settings; gameplay is never forcibly reloaded.",
+    "正在查詢開發版…": "Checking Dev build\u2026",
+    "開發版更新資料無效。": "Invalid Dev update metadata.",
+    "開發版最新版本：": "Latest Dev version: ",
+    "目前為開發版測試版本。": "This is a Dev testing build.",
+    "請透過腳本管理器檢查更新，或開啟開發版安裝檔。": "Check for updates in your userscript manager, or open the Dev userscript.",
     "背景播放中": "Playing in background",
     "背景播放會攔截頁面的視窗失焦通知，避免串流端立即停用控制器；頁內輸入框切換不受影響。": "Background playback intercepts window focus-loss notifications to keep the stream controller active. Focus changes between inputs inside the page are unaffected.",
     "背景繼續播放巨集": "Keep macros playing in background",
@@ -394,6 +404,12 @@
     const setLabel=(node,attribute,read)=>{if(activeI18n)activeI18n.bind(node,attribute,read);else node.setAttribute(attribute,String(read()??''));};
     const ask = message => confirm(translateUI(message));
 
+    const readDevVersion=text=>{
+        const header=String(text).slice(0,12000).match(/\/\/ ==UserScript==([\s\S]*?)\/\/ ==\/UserScript==/);
+        if(!header||!/^\s*\/\/\s*@name\s+CloudPad Studio \(Dev\)\s*$/m.test(header[1]))throw Error(translateUI('開發版更新資料無效。'));
+        const version=header[1].match(/^\s*\/\/\s*@version\s+(\d+\.\d+\.\d+)\s*$/m)?.[1];
+        if(!version)throw Error(translateUI('開發版更新資料無效。'));return version;
+    };
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(Number(v)) ? Number(v) : 0));
     const clone = value => JSON.parse(JSON.stringify(value));
     const slots = factory => Object.fromEntries(Array.from({length: 6}, (_, i) => [i + 1, factory()]));
@@ -1588,7 +1604,7 @@
             c.append(row,el('div','hint',()=>translateUI('備份包含六組巨集、六組佈局、名稱、曲線、映射與介面設定。匯入只保存設定，不會自動啟動巨集／連發。')));
             this.backupPreview=el('div','v15-card');this.backupPreview.hidden=true;c.append(this.backupPreview);
             const update=this.card(()=>translateUI('版本與更新'),page);update.append(el('div','meta',()=>`${APP_NAME} · v${VERSION}`));this.updateMessage=this.message(update);
-            this.updateButton=button(()=>translateUI('檢查正式版更新'),()=>this.checkUpdate());const releases=el('a','',()=>translateUI('開啟正式版本下載頁'));releases.href='https://github.com/sl721225/CloudPad-Studio/releases/latest';releases.target='_blank';releases.rel='noopener noreferrer';releases.style.color='var(--green)';update.append(this.updateButton,releases,el('div','hint',()=>translateUI('只追蹤正式 Release，不使用 main 測試版本。自動更新依腳本管理器設定執行；遊戲中不強制重載。')));
+            this.updateButton=button(()=>translateUI(UPDATE_CHANNEL==='dev'?'檢查開發版更新':'檢查正式版更新'),()=>this.checkUpdate());const releases=el('a','',()=>translateUI(UPDATE_CHANNEL==='dev'?'開啟開發版安裝檔':'開啟正式版本下載頁'));releases.href=UPDATE_CHANNEL==='dev'?DEV_SCRIPT_URL:'https://github.com/sl721225/CloudPad-Studio/releases/latest';releases.target='_blank';releases.rel='noopener noreferrer';releases.style.color='var(--green)';update.append(this.updateButton,releases,el('div','hint',()=>translateUI(UPDATE_CHANNEL==='dev'?'追蹤 v15-development 開發分支，可能包含未完成的修改。自動更新依腳本管理器設定執行；遊戲中不強制重載。':'只追蹤正式 Release，不使用 main 測試版本。自動更新依腳本管理器設定執行；遊戲中不強制重載。')));
             return page;
         }
         download(name,text,message) {
@@ -1622,13 +1638,17 @@
             this.layoutName.value=this.p.layoutNames[this.p.layoutSlot];this.speedSelect.value=String(this.p.macroSpeed);this.panel.refresh();
         }
         async checkUpdate() {
-            this.updateButton.disabled=true;setText(this.updateMessage,()=>translateUI('正在查詢正式 Release…'));
+            this.updateButton.disabled=true;setText(this.updateMessage,()=>translateUI(UPDATE_CHANNEL==='dev'?'正在查詢開發版…':'正在查詢正式 Release…'));
             try {
                 const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);this.app.signal.addEventListener('abort',()=>controller.abort(),{once:true});let response;
-                try{response=await fetch('https://api.github.com/repos/sl721225/CloudPad-Studio/releases/latest',{signal:controller.signal,credentials:'omit',headers:{Accept:'application/vnd.github+json'}});}finally{clearTimeout(timer);}
-                if(!response.ok)throw Error((translateUI("GitHub 回應 ")+String(response.status)+translateUI("，請稍後重試或開啟下載頁。")));const release=await response.json();if(this.app.destroyed)return;
+                try{response=await fetch(UPDATE_CHANNEL==='dev'?DEV_SCRIPT_URL:'https://api.github.com/repos/sl721225/CloudPad-Studio/releases/latest',{signal:controller.signal,credentials:'omit',cache:'no-store',headers:{Accept:UPDATE_CHANNEL==='dev'?'text/plain':'application/vnd.github+json'}});}finally{clearTimeout(timer);}
+                if(!response.ok)throw Error((translateUI("GitHub 回應 ")+String(response.status)+translateUI("，請稍後重試或開啟下載頁。")));const release=UPDATE_CHANNEL==='dev'?{tag_name:readDevVersion(await response.text()),body:''}:await response.json();if(this.app.destroyed)return;
                 if(release.draft||release.prerelease||!/^v?\d+\.\d+\.\d+$/.test(release.tag_name))throw Error(translateUI('未找到有效的正式版本。'));
                 const latest=release.tag_name.replace(/^v/,''),a=latest.split('.').map(Number),b=VERSION.split('.').map(Number);let newer=false;for(let i=0;i<3;i++){if(a[i]!==b[i]){newer=a[i]>b[i];break;}}
+                if(UPDATE_CHANNEL==='dev'){
+                    setText(this.updateMessage,()=>translateUI('開發版最新版本：')+latest+translateUI('；目前 ')+VERSION+'\n'+(newer?translateUI('請透過腳本管理器檢查更新，或開啟開發版安裝檔。'):latest===VERSION?translateUI('已是最新版'):translateUI('目前為開發版測試版本。')));
+                    return;
+                }
                 setText(this.updateMessage,()=>newer?(translateUI("有新版本 ")+String(latest)+"\n"+String(String(release.body||'').slice(0,3000))+translateUI("\n請透過腳本管理器更新，或開啟正式版本下載頁。")):(translateUI("正式版為 ")+String(latest)+translateUI("；目前 ")+String(VERSION)+" "+String(latest===VERSION?translateUI('已是最新版'):translateUI('比公開正式版新，尚在測試'))+"。"));
             }catch(e){if(!this.app.destroyed)setText(this.updateMessage,()=>e.name==='AbortError'?translateUI('查詢逾時，請稍後再試。'):e.message);}
             finally{if(!this.app.destroyed)this.updateButton.disabled=false;}
@@ -1877,7 +1897,7 @@
 
     // 測試可載入純邏輯類別，不啟動 DOM，也不改寫真實 navigator。
     if(typeof module==='object'&&module.exports) {
-        module.exports={I18n,translateUI,ConfigStore,InputManager,VirtualGamepad,PhysicalGamepadMonitor,ButtonAutomation,MacroEngine,MacroBackup,MacroTimeline,ConfigurationBackup,InputPipeline,LayoutManager,PointerManager,RacingController,App};return;
+        module.exports={readDevVersion,I18n,translateUI,ConfigStore,InputManager,VirtualGamepad,PhysicalGamepadMonitor,ButtonAutomation,MacroEngine,MacroBackup,MacroTimeline,ConfigurationBackup,InputPipeline,LayoutManager,PointerManager,RacingController,App};return;
     }
     if(window.top!==window.self)return;
     // Install at document-start, before the stream registers its focus-loss handlers.
