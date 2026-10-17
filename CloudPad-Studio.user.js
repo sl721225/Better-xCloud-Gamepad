@@ -3,7 +3,7 @@
 // @homepageURL https://github.com/sl721225/CloudPad-Studio
 // @supportURL  https://github.com/sl721225/CloudPad-Studio/issues
 // @namespace    http://tampermonkey.net/
-// @version      15.6.2
+// @version      15.6.3
 // @updateURL    https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js
 // @downloadURL  https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
@@ -15,7 +15,7 @@
 // ==/UserScript==
 
 /*
- * v15.6.2 — 修正前段等待拉長上一個按鍵，加入真正的空白等待與等待軌道。
+ * v15.6.3 — 巨集槽位自動開啟時間軸，切換時保護未儲存修改。
  * 沿用既有 namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -26,7 +26,7 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.6.2';
+    const VERSION = '15.6.3';
     const APP_NAME = 'CloudPad Studio (Dev)';
     const UPDATE_CHANNEL='dev';
     const DEV_SCRIPT_URL='https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js';
@@ -414,6 +414,8 @@
     Object.assign(EN,{"等待": "Wait", "空白等待": "Neutral wait", "插入空白等待": "Insert neutral wait", "在此動作前留白；跨越等待的長按會先放開，等待後再繼續。": "Insert a neutral interval before this action. Holds crossing the interval are released, then resumed.", "等待時間必須是非負數。": "Wait time must be non-negative.", "等待時間必須大於零，總時長不得超過 24 小時。": "Wait time must be positive and the total must be within 24 hours."});
     Object.assign(EN,{"前段間隔": "Gap / overlap", "間隔正值＝等待，負值＝重疊。編輯期間以前段動作為固定參考；開始時間與間隔會同步更新。": "Positive gap = wait; negative = overlap. The preceding actions stay the reference while editing. Start and gap update together.", "此動作已變更，請重新選取。": "This action changed. Select it again.", "同一按鍵或軸的動作不能重疊；請調整開始時間或持續時間。": "Actions on the same button or axis cannot overlap. Adjust the start or duration."});
     EN['欄位已修正，尚未儲存。']='Fields corrected; not saved yet.';
+    Object.assign(EN,{"切換巨集：尚未儲存": "Switch macro: unsaved changes", "有未儲存的修改。切換前要如何處理？": "There are unsaved changes. What should happen before switching?", "儲存後切換": "Save and switch", "捨棄後切換": "Discard and switch", "取消，繼續編輯": "Cancel, keep editing"});
+    EN['請先儲存或捨棄目前修改，再匯入此槽位。']='Save or discard the current edits before importing into this slot.';
     const EN_KEYS = new Map(Object.entries(EN).map(([zh,en])=>[en,zh]));
     let uiLanguage='zh-TW',activeI18n=null;
     const translateUI = text => {if(typeof text==='function')return translateUI(text());if(typeof text!=='string')return text;const key=EN_KEYS.get(text)||text;return uiLanguage==='en'?(EN[key]??key):key;};
@@ -1281,7 +1283,7 @@
         }
         macroPage() {
             const page=el('div');const slotsRow=el('div','slots');this.macroSlots=[];
-            for(let s=1;s<=6;s++){const b=button(()=>String(s),()=>{this.app.macro.select(s);this.refresh();});this.macroSlots.push(b);slotsRow.append(b);}
+            for(let s=1;s<=6;s++){const b=button(()=>String(s),()=>{if(this.app.advanced)this.app.advanced.requestMacroSlot(s);else{this.app.macro.select(s);this.refresh();}});this.macroSlots.push(b);slotsRow.append(b);}
             const style=el('style');style.textContent=`
                 .macro-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin:6px 0}
                 .macro-action{display:flex;align-items:center;justify-content:center;gap:5px;min-height:36px;font-size:12px;padding:5px}
@@ -1309,7 +1311,7 @@
             this.stopButton=action('stop',translateUI('停止'),()=>{this.app.macro.stop('button');this.refresh();});
             this.playButton=action('play',translateUI('播放'),()=>this.app.playMacro(false));this.loopButton=action('loop',translateUI('循環播放'),()=>this.app.playMacro(true));
             row.append(this.recordButton,this.playButton,this.loopButton,this.stopButton);
-            const clearRow=el('div','row');clearRow.append(button(()=>translateUI('清除'),()=>{if(ask(translateUI('清除此巨集槽位？'))){this.app.macro.clear();this.refresh();}},'danger'));
+            const clearRow=el('div','row');clearRow.append(button(()=>translateUI('清除'),()=>{if(ask(translateUI('清除此巨集槽位？'))){this.app.macro.clear();this.app.advanced?.loadEditor(this.app.macro.slot);this.refresh();}},'danger'));
             const nameRow=el('label','setting');nameRow.append(el('span','',()=>translateUI('巨集名稱')));this.macroName=el('input');this.macroName.type='text';this.macroName.maxLength=60;
             this.macroName.onchange=()=>{if(this.macroBusy())return;if(this.app.advanced?.draft&&this.app.advanced.editSlot===this.app.macro.slot){this.app.advanced.draft.name=this.macroName.value.trim();return;}const macro=this.p.macros[this.app.macro.slot],old=macro.name;macro.name=this.macroName.value.trim();if(!this.config.save()){macro.name=old;setText(this.backupMessage,()=>translateUI('名稱儲存失敗。'));}this.refreshStatus();};nameRow.append(this.macroName);
             this.macroStatus=el('div','meta');this.macroStopReason=el('div','meta');
@@ -1364,7 +1366,7 @@
             this.importApply=button(()=>translateUI('確認匯入'),()=>{
                 try {
                     if(this.macroBusy())throw Error(translateUI('請先停止錄製或播放，再匯入。'));
-                    const source=this.importSource.value,target=Number(this.importTarget.value),plan=MacroBackup.plan(doc,source,target);
+                    const source=this.importSource.value,target=Number(this.importTarget.value),plan=MacroBackup.plan(doc,source,target);if(this.app.advanced?.editorDirty()&&plan.some(m=>m.slot===this.app.advanced.editSlot))throw Error(translateUI('請先儲存或捨棄目前修改，再匯入此槽位。'));
                     const destinations=plan.map(entry=>(translateUI("槽位 ")+String(entry.slot)+"（"+String(this.p.macros[entry.slot].name||translateUI('未命名'))+"，"+String(this.p.macros[entry.slot].events.length)+translateUI(" 筆）"))).join('\n');
                     if(!ask((translateUI("匯入將取代以下巨集：\n")+String(destinations)+"\n"+String(source==='all'?translateUI('備份中的空槽也會覆蓋現有資料。\n'):'')+translateUI("確定繼續？"))))return;
                     const count=MacroBackup.commit(this.config,doc,source,target,()=>this.macroBusy());
@@ -1482,7 +1484,7 @@
             if(this.importApply){this.importApply.disabled=this.importSource.disabled=!!this.macroBusy();this.importTarget.disabled=this.macroBusy()||this.importSource.value==='all';}
         }
         refreshRecordingControls() {
-            const m=this.app.macro,physical=this.p.macroRecordSource==='physical',monitor=this.app.physical;
+            const m=this.app.macro,physical=this.p.macroRecordSource==='physical',monitor=this.app.physical;if(this.app.advanced?.editorBody)this.app.advanced.editorBody.disabled=m.recording;
             for(const [source,b] of Object.entries(this.recordSourceButtons)){b.disabled=m.recording;b.classList.toggle('on',source===this.p.macroRecordSource);b.setAttribute('aria-pressed',String(source===this.p.macroRecordSource));}
             this.recordButton.disabled=m.recording||this.app.layout.editing||(physical&&!monitor.connected);
             this.playButton.disabled=this.loopButton.disabled=m.recording;this.stopButton.disabled=!m.recording&&!m.playing;
@@ -1666,6 +1668,7 @@
 
             .macro-timeline{scroll-margin-top:50px;margin:10px 0;padding:8px;background:#09131e;border:1px solid var(--line);border-radius:8px}.timeline-scroll{overflow:auto;max-height:310px;padding:8px 0;overscroll-behavior:contain}.timeline-ruler{position:relative;height:22px;color:#93a4b6;font:10px system-ui}.timeline-ruler>span{position:absolute;transform:translateX(-50%);white-space:nowrap}.timeline-lane{display:flex;align-items:center;height:46px;border-bottom:1px solid #ffffff15}.timeline-label{position:sticky;left:0;z-index:2;flex:none;width:66px;background:#09131e;color:#c2d7e8;font-size:11px}.timeline-track{position:relative;height:40px;flex:none;background:repeating-linear-gradient(90deg,#ffffff0a 0,#ffffff0a 1px,transparent 1px,transparent 20%)}.timeline-bar{position:absolute;top:5px;height:30px;display:flex;align-items:center;border:1px solid #71baff;border-radius:5px;background:#24466b;cursor:grab;color:#ecf6ff;box-sizing:border-box;overflow:visible;font:10px system-ui;user-select:none}.timeline-bar>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 5px;pointer-events:none}.timeline-bar.selected{outline:2px solid #74efb4;background:#235341}.timeline-bar.point{background:#63512c;border-color:#f0c56e}.timeline-resize{position:absolute;right:0;top:0;height:100%;width:18px;display:grid;place-items:center;background:#ffffff18;cursor:ew-resize;border-left:1px solid #ffffff40}.timeline-wait{position:absolute;top:7px;height:26px;border:1px dashed #d5b569;color:#ffe4a4;background:repeating-linear-gradient(135deg,#76602a33 0,#76602a33 5px,#76602a66 5px,#76602a66 10px);font:10px/24px system-ui;text-align:center;overflow:hidden;white-space:nowrap}.percent-input{width:64px!important;text-align:center}.edit-value input[type=range]{width:100%;margin:5px 0}.macro-window .edit-step{border-color:#74efb477}
 
+            .macro-editor-body{border:0;padding:0;margin:0;min-width:0}.slot-prompt-overlay{position:fixed;inset:0;z-index:30;pointer-events:auto;background:#0009;display:grid;place-items:center;padding:16px}.slot-prompt{width:min(460px,calc(100vw - 32px));background:#142333;color:#edf4fa;border:1px solid #74efb4;border-radius:12px;box-shadow:0 10px 50px #0009;padding:16px;font:13px/1.6 system-ui}.slot-prompt .row{margin-top:12px}.slot-prompt-message{white-space:pre-wrap;overflow-wrap:anywhere}
             .edit-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}.edit-heading .row{margin:0}.edit-timings{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:6px 0}.edit-timings .edit-time{margin:0;display:grid;grid-template-columns:auto 28px minmax(50px,1fr) 28px;gap:4px}.edit-timings .edit-time>input{width:100%;min-width:0}.edit-timings .edit-time>button{padding:5px}.edit-timings .field-error{grid-column:1/-1}.edit-timings .edit-time>.meta{grid-column:1/-1}.edit-options{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:start}.edit-options .edit-value{margin:0;gap:4px}.edit-value .field-error{flex-basis:100%;min-height:15px}.edit-reference{margin:4px 0}.edit-output .duration-presets{margin-bottom:5px}.edit-output .edit-value input[type=range]{width:120px;flex:1;min-width:75px;margin:3px 0}.edit-output .row{gap:3px}.edit-output .row button{padding:5px 7px}
             @media(max-width:700px){.edit-timings{grid-template-columns:repeat(2,minmax(0,1fr))}.edit-timings .edit-time{grid-template-columns:28px minmax(50px,1fr) 28px}.edit-timings .edit-time>span:first-child{grid-column:1/-1}.edit-options{grid-template-columns:1fr}.edit-output .edit-value input[type=range]{min-width:120px}.edit-heading{align-items:start}}
             @media(max-width:390px){.macro-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.macro-window{padding:7px}.macro-window .float-header{top:-7px}}
@@ -1679,7 +1682,7 @@
             window.addEventListener('resize',()=>{this.fitFloating(this.macroWindow,'macroWindowPos');this.fitFloating(this.quickbar,'quickbarPos',true);this.refreshTimeline();},{signal:this.app.signal});
         }
         toggleMacroWindow(open=this.macroWindow.hidden) {
-            this.macroWindow.hidden=!open;if(open){this.panel.pages.macro.hidden=false;this.placeFloating(this.macroWindow,'macroWindowPos');this.panel.refreshStatus();}
+            this.macroWindow.hidden=!open;if(open){this.panel.pages.macro.hidden=false;this.placeFloating(this.macroWindow,'macroWindowPos');if(!this.draft)this.loadEditor(this.app.macro.slot);else if(this.editSlot!==this.app.macro.slot)this.requestMacroSlot(this.app.macro.slot);this.refreshTimeline();this.panel.refreshStatus();}
             this.panel.macroQuick.classList.toggle('on',open);this.panel.macroQuick.setAttribute('aria-expanded',String(open));
         }
         placeFloating(node,key,snap=false) {
@@ -1692,13 +1695,39 @@
         bindFloating(grip,node,key,snap=false) {
             this.app.dragElement(grip,node,()=>{this.fitFloating(node,key,snap);this.p[key]={x:node.style.left,y:node.style.top};this.app.config.save();});
         }
+        draftSignature() {if(!this.draft)return null;const events=this.draft.events.map(e=>({t:e.t,type:e.type,id:e.id,val:e.val}));for(const [event,time] of this.model.implicitEnds)if(event.val!==0&&this.draft.events.includes(event))events.push({t:time,type:event.type,id:event.id,val:0});events.sort((a,b)=>a.t-b.t);return JSON.stringify({name:this.draft.name,duration:this.draft.duration,events});}
+        editorDirty() {return !!this.draft&&(!!this.editErrors?.size||this.draftSignature()!==this.draftBaseline);}
+        loadEditor(slot=this.app.macro.slot) {
+            this.editSlot=slot;this.editorSource=this.p.macros[slot];this.model=new MacroDraft(this.editorSource);this.draft=this.model.data;this.model.sync();this.editPage=0;this.editMode=this.p.macroEditModes[slot];this.baselineMode=this.editMode;this.draftBaseline=this.draftSignature();
+            this.shiftFollowing=true;this.selectedEvent=null;this.editErrors=new Map();this.waitContext=null;this.timelineScroll=0;this.editorMessage.style.minHeight='';this.editorMessage.dataset.success='false';setText(this.editorMessage,()=>'');this.renderEditor();this.panel.macroName.value=this.draft.name;this.panel.macroName.dataset.slot=String(slot);this.panel.refreshStatus();
+        }
+        switchMacroSlot(slot,after=null) {
+            this.app.macro.select(slot);this.loadEditor(slot);this.panel.refresh();after?.();this.panel.macroSlots[slot-1]?.focus();
+        }
+        requestMacroSlot(slot,after=null) {
+            if(!Number.isInteger(slot)||slot<1||slot>6)return;
+            if(this.draft&&this.editSlot===slot&&this.app.macro.slot===slot){after?.();return;}
+            if(!this.editorDirty()){this.switchMacroSlot(slot,after);return;}
+            this.showSlotPrompt(slot,after);
+        }
+        showSlotPrompt(slot,after) {
+            if(this.macroWindow.hidden){this.macroWindow.hidden=false;this.panel.pages.macro.hidden=false;this.placeFloating(this.macroWindow,'macroWindowPos');this.panel.macroQuick.classList.add('on');this.panel.macroQuick.setAttribute('aria-expanded','true');}
+            if(this.slotPrompt&&!this.slotPrompt.hidden)return;
+            const overlay=el('div','slot-prompt-overlay'),dialog=el('section','slot-prompt');dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');setLabel(dialog,'aria-label',()=>translateUI('切換巨集：尚未儲存'));
+            const from=this.editSlot,name=this.draft.name||this.p.macros[from].name||'',message=el('div','slot-prompt-message',()=>`${translateUI('槽位')} ${from} · ${name||translateUI('未命名')}
+${translateUI('有未儲存的修改。切換前要如何處理？')}`),actions=el('div','row');
+            const close=()=>{overlay.remove();if(this.slotPrompt===overlay)this.slotPrompt=null;};
+            const save=button(()=>translateUI('儲存後切換'),()=>{close();this.app.macro.stop('slot');if(this.saveEditor(false))this.switchMacroSlot(slot,after);}),discard=button(()=>translateUI('捨棄後切換'),()=>{close();this.switchMacroSlot(slot,after);}),cancel=button(()=>translateUI('取消，繼續編輯'),()=>{close();this.panel.macroSlots[from-1]?.focus();});
+            actions.append(save,discard,cancel);dialog.append(el('strong','',()=>translateUI('切換巨集：尚未儲存')),message,actions);overlay.append(dialog);this.app.shadow.append(overlay);this.slotPrompt=overlay;
+            overlay.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();cancel.click();}else if(event.key==='Tab'){const list=[save,discard,cancel],index=list.indexOf(this.app.shadow.activeElement);event.preventDefault();list[(index+(event.shiftKey?-1:1)+list.length)%list.length].focus();}},{signal:this.app.signal});cancel.focus();
+        }
+        syncEditorSource() {
+            if(!this.draft||this.slotPrompt||this.app.macro.recording)return;
+            if(this.editSlot===this.app.macro.slot&&this.editorSource!==this.p.macros[this.editSlot]&&!this.editorDirty())this.loadEditor(this.editSlot);
+        }
         editorPage() {
             const c=this.card(()=>translateUI('巨集時間軸編輯器'));this.editorMessage=this.message(c);this.editorMessage.classList.add('editor-alert');this.editorMessage.setAttribute('role','alert');
-            c.append(button(()=>translateUI('編輯此巨集'),()=>{try{
-                this.requireIdle();if(this.draft){if(this.editSlot===this.app.macro.slot){this.renderEditor();return;}if(!ask(translateUI('捨棄目前草稿並重新載入？')))return;}
-                this.editSlot=this.app.macro.slot;this.model=new MacroDraft(this.p.macros[this.editSlot]);this.draft=this.model.data;this.editPage=0;this.editMode=this.p.macroEditModes[this.editSlot];this.shiftFollowing=true;this.editErrors=new Map();this.waitContext=null;this.editorMessage.style.minHeight='';setText(this.editorMessage,()=>'');this.renderEditor();this.timelineMount?.scrollIntoView({block:'start'});this.panel.macroName.value=this.draft.name;this.panel.refreshStatus();
-            }catch(e){setText(this.editorMessage,()=>translateUI(e.message));}}));
-            this.editorBody=el('div');c.append(this.editorBody);
+            this.editorBody=el('fieldset','macro-editor-body');c.append(this.editorBody);
             this.speedSelect=this.select(c,()=>translateUI('播放速度'),[[.25,'0.25×'],[.5,'0.5×'],[.75,'0.75×'],[1,'1×'],[1.5,'1.5×'],[2,'2×'],[3,'3×']],this.p.macroSpeed,v=>this.attempt(this.editorMessage,()=>this.saveChange(()=>this.p.macroSpeed=Number(v))));return c;
         }
         eventKey(event) {this.editEventKeys??=new WeakMap();if(!this.editEventKeys.has(event))this.editEventKeys.set(event,`event${this.editEventSequence=(this.editEventSequence||0)+1}`);return this.editEventKeys.get(event);}
@@ -1812,15 +1841,15 @@
                 const tools=el('div','row');tools.append(button(()=>translateUI('依時間排序'),()=>{if(this.editErrors.size)return;d.events.sort((a,b)=>a.t-b.t);this.renderEditor();}));
                 const shift=el('input');shift.type='number';shift.step=.001;shift.value=0;setLabel(shift,'aria-label',()=>translateUI('整段平移秒數'));tools.append(shift,button(()=>translateUI('整段平移'),()=>{const delta=Number(shift.value)*1000;if(this.editErrors.size||shift.value===''||!Number.isFinite(delta)||d.events.some(e=>e.t+delta<0)||this.model.last()+this.model.tail+delta>86400000){setText(this.editorMessage,()=>translateUI('平移後不可產生負時間。'));return;}d.events.forEach(e=>e.t+=delta);this.renderEditor();}));body.append(tools);
             }
-            const actions=el('div','row');actions.append(button(()=>translateUI('＋ 同時新增'),()=>{if(d.events.length+2>MacroBackup.MAX_EVENTS||this.editErrors.size)return;const t=this.selectedEvent?.t||0;d.events.push({t,type:'btn',id:0,val:1},{t:Math.min(86400000,t+100),type:'btn',id:0,val:0});this.selectedEvent=d.events[d.events.length-2];this.model.sync();this.editPage=Math.floor(this.editorRows().findIndex(r=>r.start===this.selectedEvent)/pageSize);this.renderEditor();}),button(()=>translateUI('＋ 插入動作'),()=>{if(d.events.length+2>MacroBackup.MAX_EVENTS)return;const t=this.model.last();d.events.push({t,type:'btn',id:0,val:1},{t:t+100,type:'btn',id:0,val:0});this.model.sync();this.selectedEvent=d.events[d.events.length-2];this.editPage=Math.floor((this.editorRows().length-1)/pageSize);this.renderEditor();}),button(()=>translateUI('儲存並取代原巨集'),()=>this.saveEditor()),button(()=>translateUI('捨棄草稿'),()=>{if(ask(translateUI('捨棄未儲存的草稿？'))){this.draft=null;this.renderEditor();this.panel.refreshStatus();setText(this.editorMessage,()=>translateUI('草稿已捨棄，原巨集不變。'));}}));body.append(actions);
+            const actions=el('div','row');actions.append(button(()=>translateUI('＋ 同時新增'),()=>{if(d.events.length+2>MacroBackup.MAX_EVENTS||this.editErrors.size)return;const t=this.selectedEvent?.t||0;d.events.push({t,type:'btn',id:0,val:1},{t:Math.min(86400000,t+100),type:'btn',id:0,val:0});this.selectedEvent=d.events[d.events.length-2];this.model.sync();this.editPage=Math.floor(this.editorRows().findIndex(r=>r.start===this.selectedEvent)/pageSize);this.renderEditor();}),button(()=>translateUI('＋ 插入動作'),()=>{if(d.events.length+2>MacroBackup.MAX_EVENTS)return;const t=this.model.last();d.events.push({t,type:'btn',id:0,val:1},{t:t+100,type:'btn',id:0,val:0});this.model.sync();this.selectedEvent=d.events[d.events.length-2];this.editPage=Math.floor((this.editorRows().length-1)/pageSize);this.renderEditor();}),button(()=>translateUI('儲存並取代原巨集'),()=>this.saveEditor()),button(()=>translateUI('捨棄草稿'),()=>{if(ask(translateUI('捨棄未儲存的草稿？'))){this.loadEditor(this.app.macro.slot);setText(this.editorMessage,()=>translateUI('草稿已捨棄，原巨集不變。'));}}));body.append(actions);
             if(this.focusError){const error=this.focusError;this.focusError=null;const target=error.owner===this.model?body.querySelector('.edit-invalid'):body.querySelector(`[data-event="${d.events.indexOf(error.owner)}"] .edit-invalid`);target?.scrollIntoView({block:'center'});target?.focus();}
         }
-        saveEditor() {
+        saveEditor(confirmReplace=true) {
             this.editorMessage.style.minHeight='';this.editorMessage.dataset.success='false';try{
-                this.requireIdle();for(const e of this.draft.events)if(!Number.isFinite(e.t)||e.t<0||e.t>86400000)this.editErrors.set(`${this.eventKey(e)}:time`,{raw:String(e.t/1000),owner:e,field:'time'});if(this.model.last()+this.model.tail>86400000)this.editErrors.set('tail',{raw:String(this.model.tail/1000),owner:this.model,field:'tail'});if(this.editErrors.size){const error=this.editErrors.values().next().value;if(error.owner!==this.model&&this.editMode==='simple'&&this.editorRows().some(r=>r.end===error.owner))this.editMode='fine';const rows=this.editorRows(),index=rows.findIndex(r=>r.start===error.owner||r.end===error.owner);this.editPage=Math.floor(Math.max(0,index)/20);this.focusError=error;this.selectedEvent=rows[Math.max(0,index)]?.start;this.renderEditor();setText(this.editorMessage,()=>`${translateUI('尚未儲存：請修正第')} ${Math.max(1,index+1)} ${translateUI('筆標紅欄位。')}`);return;}
-                this.model.sync();MacroTimeline.normalize(this.draft);if(!ask(`${translateUI('以草稿取代槽位')} ${this.editSlot}？`))return;
-                this.model.finalize();const previousMode=this.p.macroEditModes[this.editSlot];this.p.macroEditModes[this.editSlot]=this.editMode;try{MacroTimeline.save(this.app.config,this.editSlot,this.draft);}catch(error){this.p.macroEditModes[this.editSlot]=previousMode;throw error;}this.draft=null;this.renderEditor();this.panel.refreshStatus();this.syncQuickbar();this.editorMessage.dataset.success='true';setText(this.editorMessage,()=>translateUI('已儲存。'));
-            }catch(e){setText(this.editorMessage,()=>translateUI(e.message));}
+                this.requireIdle();for(const e of this.draft.events)if(!Number.isFinite(e.t)||e.t<0||e.t>86400000)this.editErrors.set(`${this.eventKey(e)}:time`,{raw:String(e.t/1000),owner:e,field:'time'});if(this.model.last()+this.model.tail>86400000)this.editErrors.set('tail',{raw:String(this.model.tail/1000),owner:this.model,field:'tail'});if(this.editErrors.size){const error=this.editErrors.values().next().value;if(error.owner!==this.model&&this.editMode==='simple'&&this.editorRows().some(r=>r.end===error.owner))this.editMode='fine';const rows=this.editorRows(),index=rows.findIndex(r=>r.start===error.owner||r.end===error.owner);this.editPage=Math.floor(Math.max(0,index)/20);this.focusError=error;this.selectedEvent=rows[Math.max(0,index)]?.start;this.renderEditor();setText(this.editorMessage,()=>`${translateUI('尚未儲存：請修正第')} ${Math.max(1,index+1)} ${translateUI('筆標紅欄位。')}`);return false;}
+                this.model.sync();MacroTimeline.normalize(this.draft);if(confirmReplace&&!ask(`${translateUI('以草稿取代槽位')} ${this.editSlot}？`))return false;
+                this.model.finalize();const previousMode=this.p.macroEditModes[this.editSlot];this.p.macroEditModes[this.editSlot]=this.editMode;try{MacroTimeline.save(this.app.config,this.editSlot,this.draft);}catch(error){this.p.macroEditModes[this.editSlot]=previousMode;throw error;}this.loadEditor(this.editSlot);this.syncQuickbar();this.editorMessage.dataset.success='true';setText(this.editorMessage,()=>translateUI('已儲存。'));return true;
+            }catch(e){setText(this.editorMessage,()=>translateUI(e.message));return false;}
         }
         layoutPage() {
             const c=this.card(()=>translateUI('佈局管理'));this.layoutMessage=this.message(c);this.layoutName=el('input');this.layoutName.type='text';this.layoutName.maxLength=60;setLabel(this.layoutName,"aria-label",()=>translateUI('佈局名稱'));this.layoutName.value=this.p.layoutNames[this.p.layoutSlot];
@@ -1886,7 +1915,7 @@
             for(let s=1;s<=6;s++)preview.append(el('div','meta',()=>(translateUI("巨集 ")+String(s)+"："+String(data.macros[s].name||translateUI('未命名'))+"，"+String(data.macros[s].events.length)+translateUI(" 筆；佈局 ")+String(s)+"："+String(data.layoutNames[s]||translateUI('未命名'))+translateUI("，面板 ")+String(Object.keys(data.layouts[s]).length)+translateUI("／觸控 ")+String(Object.keys(data.touchLayouts[s]).length)+translateUI(" 個位移"))));
             const choices={};for(const [key,label] of [['macros',()=>translateUI('六組巨集')],['layouts',()=>translateUI('六組佈局與名稱')],['settings',()=>translateUI('介面／曲線／映射／快捷設定')]])if(allowed.includes(key))choices[key]=this.check(preview,()=>(translateUI("還原")+String(translateUI(label))),true,()=>{});
             this.restoreButton=button(()=>translateUI('確認還原所選項目'),()=>{try{this.requireIdle();const groups=Object.keys(choices).filter(k=>choices[k].checked);if(!groups.length)throw Error(translateUI('請至少選一項。'));if(!ask((translateUI("取代目前的 ")+String(groups.join('、'))+translateUI("？空槽也會覆蓋原資料。"))))return;
-                this.app.stopAll();ConfigurationBackup.commit(this.app.config,data,groups);this.fileToken++;this.restorePending=false;preview.hidden=true;this.draft=null;this.renderEditor();this.app.layout.apply();this.app.viewer.resize();this.app.changeModeAfterRestore?.();this.placeFloating(this.macroWindow,'macroWindowPos');this.placeFloating(this.quickbar,'quickbarPos',true);this.app.setLanguage(this.p.language);this.panel.languageSelect.value=this.p.language;this.panel.refresh();this.refreshControls();this.syncQuickbar();setText(this.backupMessage,()=>translateUI('已還原所選資料；自動操作維持停止。'));
+                this.app.stopAll();ConfigurationBackup.commit(this.app.config,data,groups);this.fileToken++;this.restorePending=false;preview.hidden=true;this.loadEditor(this.app.macro.slot);this.app.layout.apply();this.app.viewer.resize();this.app.changeModeAfterRestore?.();this.placeFloating(this.macroWindow,'macroWindowPos');this.placeFloating(this.quickbar,'quickbarPos',true);this.app.setLanguage(this.p.language);this.panel.languageSelect.value=this.p.language;this.panel.refresh();this.refreshControls();this.syncQuickbar();setText(this.backupMessage,()=>translateUI('已還原所選資料；自動操作維持停止。'));
             }catch(e){setText(this.backupMessage,()=>translateUI(e.message));}});preview.append(this.restoreButton,button(()=>translateUI('取消還原'),()=>{this.fileToken++;this.restorePending=false;preview.hidden=true;setText(this.backupMessage,()=>translateUI('已取消，資料沒有變更。'));}));setText(message,()=>translateUI('檔案驗證完成。'));this.panel.refresh();
         }
         refreshControls() {
@@ -1920,7 +1949,7 @@
             this.quickButtons.forEach((b,i)=>{const m=this.p.macros[i+1];b.hidden=!m.events.length;setText(b,()=>`${this.app.macro.playing&&this.app.macro.slot===i+1&&this.app.macro.loop?'↻ ':''}${i+1} ${m.name||translateUI('未命名')}`);setLabel(b,'title',()=>m.name||(translateUI("巨集 ")+String(i+1)));b.disabled=this.app.macro.recording||this.app.layout.editing||!m.events.length;b.classList.toggle('on',this.app.macro.playing&&this.app.macro.slot===i+1);});
         }
         tick(now) {
-            if(now-this.lastTick<100)return;this.lastTick=now;this.syncQuickbar();if(this.restoreButton)this.restoreButton.disabled=this.busy()||this.app.layout.editing;
+            if(now-this.lastTick<100)return;this.lastTick=now;this.syncQuickbar();this.syncEditorSource();if(this.restoreButton)this.restoreButton.disabled=this.busy()||this.app.layout.editing;
             if(this.app.shadow.activeElement!==this.layoutName)this.layoutName.value=this.p.layoutNames[this.p.layoutSlot];
             if(this.panel.tab!=='diagnostics'||this.panel.collapsed)return;
             const a=this.app,raw=a.rawSnapshot(),out=a.input.snapshot(),real=a.physical.state;
@@ -2060,8 +2089,8 @@
             if(!this.config.save()){p.controlStyle=old;this.notice(translateUI('佈局切換儲存失敗，已保留原模式。'));}
             this.override=false;this.manualUntil=this.clock()+2500;this.panel.refresh();this.updateVisibility();
         }
-        playMacro(loop,slot=this.macro.slot) {if(this.macro.recording){this.notice(translateUI('請先停止錄製，再播放巨集。'));return;}this.stopAll();this.macro.slot=slot;if(!this.macro.play(loop))this.notice((translateUI("槽位 ")+String(slot)+translateUI(" 沒有可播放的動作。")));this.panel.refresh();}
-        startRecording() {
+        playMacro(loop,slot=this.macro.slot,approved=false) {if(this.macro.recording){this.notice(translateUI('請先停止錄製，再播放巨集。'));return;}if(!approved&&this.advanced&&(slot!==this.macro.slot||this.advanced.draft&&this.advanced.editSlot!==slot)){this.advanced.requestMacroSlot(slot,()=>this.playMacro(loop,slot,true));return;}this.stopAll();this.macro.slot=slot;if(!this.macro.play(loop))this.notice((translateUI("槽位 ")+String(slot)+translateUI(" 沒有可播放的動作。")));this.panel.refresh();}
+        startRecording(approved=false) {
             if(this.macro.recording)return;
             if(this.layout.editing){this.notice(translateUI('請先完成佈局編輯，再錄製巨集。'));return;}
             const source=this.config.prefs.macroRecordSource;
@@ -2069,6 +2098,7 @@
                 this.physical.poll(this.clock());
                 if(!this.physical.connected){this.notice(translateUI('未連接實體手把，無法開始錄製。'));this.panel.refresh();return;}
             }
+            if(!approved&&this.advanced?.editorDirty()){this.advanced.showSlotPrompt(this.macro.slot,()=>this.startRecording(true));return;}
             this.stopAll();
             const physicalIndex=source==='physical'?this.physical.lastIndex:null;
             this.macro.record(source==='physical'?()=>this.physical.state:null,{source,physicalIndex});
