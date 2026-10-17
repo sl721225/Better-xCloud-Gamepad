@@ -3,7 +3,7 @@
 // @homepageURL https://github.com/sl721225/CloudPad-Studio
 // @supportURL  https://github.com/sl721225/CloudPad-Studio/issues
 // @namespace    http://tampermonkey.net/
-// @version      15.7.0
+// @version      15.8.0
 // @updateURL    https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js
 // @downloadURL  https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
@@ -15,7 +15,7 @@
 // ==/UserScript==
 
 /*
- * v15.7.0 — 時間軸優先編輯器、可編輯等待、復原／重做與目前草稿試播。
+ * v15.8.0 — 時間軸優先編輯器、可編輯等待、復原／重做與目前草稿試播。
  * 沿用既有 namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -26,7 +26,7 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.7.0';
+    const VERSION = '15.8.0';
     const APP_NAME = 'CloudPad Studio (Dev)';
     const UPDATE_CHANNEL='dev';
     const DEV_SCRIPT_URL='https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js';
@@ -409,7 +409,7 @@
 };
     Object.assign(EN,{"來源": "Source", "巨集工作室": "Macro Studio", "⠿ 巨集工作室": "⠿ Macro Studio", "拖曳快捷列": "Drag quickbar", "新增／管理巨集": "Add / manage macros", "↻ 循環": "↻ Loop", "▶ 單次": "▶ Once", "重設巨集視窗與快捷列位置": "Reset macro window and quickbar positions", "重設位置": "Reset position", "編輯此巨集": "Edit this macro", "總時長": "Total duration", "槽位": "Slot", "筆": "events", "秒": "s", "結尾等待": "Tail wait", "簡易": "Simple", "精細": "Precise", "連同後續一起移動": "Move following actions together", "修改按住時間時，後續動作跟著移動。": "Changing the hold duration also moves subsequent actions.", "只改此動作：其他時間保持不變，可同時按鍵。": "Only this action: keep other times to allow overlapping inputs.", "開始時間": "Start time", "按住時間": "Hold duration", "前段等待": "Wait before action", "有效範圍": "Valid range", "按住": "Hold", "放開": "Release", "方向": "Direction", "上": "Up", "下": "Down", "左": "Left", "右": "Right", "搖桿幅度": "Stick strength", "按壓深度": "Trigger depth", "回中": "Center", "全推": "Full", "全按": "Full", "短按": "Tap", "動作類型": "Action type", "請先修正標紅欄位。": "Please correct the highlighted fields first.", "尚未儲存：請修正第": "Not saved: correct action", "筆標紅欄位。": "highlighted fields.", "以草稿取代槽位": "Replace slot with draft", "編輯只修改暫存草稿，儲存後才取代原巨集。關閉視窗會保留草稿，錄製與播放仍繼續。簡易模式修改按住時間時，預設連同後續動作一起移動；只改此動作可保留同時按鍵。": "Edits stay in a temporary draft until saved. Closing this window keeps the draft and does not stop recording or playback. Simple mode moves later actions when changing hold duration; turn this off to preserve overlapping inputs."});
     EN['短按（原始時間保留）']='Short press (original timing preserved)';
-    Object.assign(EN,{"動作時間軸": "Action timeline", "縮小": "Fit", "放大": "Zoom in", "再放大": "Zoom further", "拖長條移動時間，拖右端改持續時間；重疊表示同時操作。": "Drag a bar to move it; drag its right edge to change duration. Overlapping bars play together.", "拖曳持續時間": "Resize duration", "新增動作以建立時間軸。": "Add an action to create a timeline.", "搖桿百分比": "Stick percentage", "油門／煞車百分比": "Trigger percentage", "百分比減少 1": "Decrease percentage by 1", "百分比增加 1": "Increase percentage by 1", "負＝左 · 0＝回中 · 正＝右": "Negative = left · 0 = center · positive = right", "負＝上 · 0＝回中 · 正＝下": "Negative = up · 0 = center · positive = down", "0＝放開 · 100＝全按": "0 = released · 100 = fully pressed", "持續時間必須大於零，結束不得超過 24 小時。": "Duration must be positive and end within 24 hours.", "此按鍵後面已有其他動作，請縮短時間或開啟連同後續一起移動。": "This control has a later action. Shorten this action or enable moving subsequent actions.", "結束不得超過 24 小時。": "The end must be within 24 hours."});
+    Object.assign(EN,{"LS 左搖桿":"LS Left stick","RS 右搖桿":"RS Right stick","符合視窗":"Fit to view","拖曳調整搖桿方向與幅度":"Drag to adjust stick direction and magnitude","動作時間軸": "Action timeline", "縮小": "Fit", "放大": "Zoom in", "再放大": "Zoom further", "拖長條移動時間，拖右端改持續時間；重疊表示同時操作。": "Drag a bar to move it; drag its right edge to change duration. Overlapping bars play together.", "拖曳持續時間": "Resize duration", "新增動作以建立時間軸。": "Add an action to create a timeline.", "搖桿百分比": "Stick percentage", "油門／煞車百分比": "Trigger percentage", "百分比減少 1": "Decrease percentage by 1", "百分比增加 1": "Increase percentage by 1", "負＝左 · 0＝回中 · 正＝右": "Negative = left · 0 = center · positive = right", "負＝上 · 0＝回中 · 正＝下": "Negative = up · 0 = center · positive = down", "0＝放開 · 100＝全按": "0 = released · 100 = fully pressed", "持續時間必須大於零，結束不得超過 24 小時。": "Duration must be positive and end within 24 hours.", "此按鍵後面已有其他動作，請縮短時間或開啟連同後續一起移動。": "This control has a later action. Shorten this action or enable moving subsequent actions.", "結束不得超過 24 小時。": "The end must be within 24 hours."});
     Object.assign(EN,{'＋ 同時新增':'+ Add simultaneous action','事件較多，時間軸顯示目前頁面的動作；使用下方翻頁查看其餘動作。':'For large recordings, the timeline shows the current page. Use the page controls below to inspect more actions.'});
     Object.assign(EN,{"等待": "Wait", "空白等待": "Neutral wait", "插入空白等待": "Insert neutral wait", "在此動作前留白；跨越等待的長按會先放開，等待後再繼續。": "Insert a neutral interval before this action. Holds crossing the interval are released, then resumed.", "等待時間必須是非負數。": "Wait time must be non-negative.", "等待時間必須大於零，總時長不得超過 24 小時。": "Wait time must be positive and the total must be within 24 hours."});
     Object.assign(EN,{"前段間隔": "Gap / overlap", "間隔正值＝等待，負值＝重疊。編輯期間以前段動作為固定參考；開始時間與間隔會同步更新。": "Positive gap = wait; negative = overlap. The preceding actions stay the reference while editing. Start and gap update together.", "此動作已變更，請重新選取。": "This action changed. Select it again.", "同一按鍵或軸的動作不能重疊；請調整開始時間或持續時間。": "Actions on the same button or axis cannot overlap. Adjust the start or duration."});
@@ -858,6 +858,8 @@
                     rows.push({start:e,end,boundary:next&&!end?next:null,next:end?events[n+2]?.e:next,index:i,held:true});
                 });
             }
+            // Consecutive neutral axis endpoints retain editable zero-valued vector components.
+            for(const events of channels.values())for(let n=0;n<events.length-1;n++){const {e,i}=events[n],next=events[n+1].e;if(e.type==='axis'&&e.val===0&&next.val===0&&next.t>e.t&&!used.has(e)){rows.push({start:e,end:next,index:i,held:true});used.add(e);used.add(next);n++;}}
             this.data.events.forEach((e,i)=>{if(e.val===0&&!used.has(e))rows.push({start:e,end:null,index:i,held:false});});
             return rows.sort((a,b)=>a.start.t-b.start.t||a.index-b.index);
         }
@@ -935,7 +937,7 @@
             action.start.t=time;if(action.end)action.end.t+=delta;else if(this.implicitEnds.has(action.start))this.implicitEnds.set(action.start,Math.max(time,this.implicitEnds.get(action.start)));this.sync();
         }
         gaps() {
-            const intervals=this.actions().filter(a=>a.held).map(a=>[a.start.t,this.endTime(a)]).sort((a,b)=>a[0]-b[0]),gaps=[];let cursor=0;
+            const intervals=this.actions().filter(a=>a.held&&a.start.val!==0).map(a=>[a.start.t,this.endTime(a)]).sort((a,b)=>a[0]-b[0]),gaps=[];let cursor=0;
             for(const [start,end] of intervals){if(start>cursor)gaps.push({start:cursor,end:start});cursor=Math.max(cursor,end);}if(this.data.duration>cursor)gaps.push({start:cursor,end:this.data.duration});return gaps;
         }
         resizeGap(gap,value) {return this.atomic({},()=>{
@@ -1753,8 +1755,8 @@
             if(this.app.macro.recording)return;if(this.editErrors.size){setText(this.editorMessage,()=>translateUI('請先修正標紅欄位。'));return;}
             this.actionPicker?.remove();const overlay=el('div','slot-prompt-overlay'),dialog=el('section','slot-prompt action-picker'),tools=el('div','row'),simultaneous=el('input');simultaneous.type='checkbox';setLabel(simultaneous,'aria-label',()=>translateUI('同時開始'));dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');setLabel(dialog,'aria-label',()=>translateUI('新增動作'));
             const close=()=>{overlay.remove();this.actionPicker=null;},position=el('label','row');position.append(simultaneous,el('span','',()=>translateUI('同時開始')));tools.append(el('strong','',()=>translateUI('新增動作')),position,button('×',close));dialog.append(tools,el('div','hint',()=>translateUI('預設接在選取動作後；勾選同時開始可重疊操作。')));
-            const grid=el('div','picker-grid'),message=el('div','field-error');const add=(type,id)=>{try{const selected=this.model.actions().find(a=>a.start===this.selectedEvent),time=this.selectedGap?this.selectedGap.start:selected?(simultaneous.checked||!selected.held?selected.start.t:this.model.endTime(selected)):this.model.last();this.editChange(()=>{this.selectedEvent=this.model.addAction(type,id,time,100,1);this.selectedGap=null;});this.waitContext=null;this.editPage=Math.floor(this.editorRows().findIndex(a=>a.start===this.selectedEvent)/20);close();this.renderEditor();}catch(error){setText(message,()=>translateUI(error.message));}};
-            for(let id=0;id<17;id++)grid.append(button(()=>this.controlName({type:'btn',id}),()=>add('btn',id)));for(let id=0;id<4;id++)grid.append(button(()=>this.controlName({type:'axis',id}),()=>add('axis',id)));
+            const grid=el('div','picker-grid'),message=el('div','field-error');const add=(type,id)=>{try{const selected=this.model.actions().find(a=>a.start===this.selectedEvent),time=this.selectedGap?this.selectedGap.start:selected?(simultaneous.checked||!selected.held?selected.start.t:this.model.endTime(selected)):this.model.last();this.editChange(()=>{this.model.atomic({},()=>{const added=this.model.addAction(type,id,time,100,1);if(type==='axis')this.model.addAction(type,id+1,time,100,0);this.selectedEvent=added;});this.selectedGap=null;});this.waitContext=null;this.editPage=Math.floor(this.editorRows().findIndex(a=>a.start===this.selectedEvent)/20);close();this.renderEditor();}catch(error){setText(message,()=>translateUI(error.message));}};
+            for(let id=0;id<17;id++)grid.append(button(()=>this.controlName({type:'btn',id}),()=>add('btn',id)));for(const [id,label] of [[0,'LS 左搖桿'],[2,'RS 右搖桿']])grid.append(button(()=>translateUI(label),()=>add('axis',id)));
             grid.append(button(()=>translateUI('等待'),()=>{try{const selected=this.model.actions().find(a=>a.start===this.selectedEvent),time=this.selectedGap?.start??(selected?(selected.held?this.model.endTime(selected):selected.start.t):this.model.last());this.editChange(()=>{this.model.insertWait(time,100);this.selectedEvent=null;this.selectedGap={start:time,end:time+100};});close();this.renderEditor();}catch(error){setText(message,()=>translateUI(error.message));}}));dialog.append(grid,message);overlay.append(dialog);this.app.shadow.append(overlay);this.actionPicker=overlay;overlay.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();close();}else if(event.key==='Tab'){const controls=[...dialog.querySelectorAll('button,input')].filter(n=>!n.disabled),i=controls.indexOf(this.app.shadow.activeElement);event.preventDefault();controls[(i+(event.shiftKey?-1:1)+controls.length)%controls.length].focus();}},{signal:this.app.signal});grid.querySelector('button')?.focus();
         }
         draftSignature() {if(!this.draft)return null;const events=this.draft.events.map(e=>({t:e.t,type:e.type,id:e.id,val:e.val}));for(const [event,time] of this.model.implicitEnds)if(event.val!==0&&this.draft.events.includes(event))events.push({t:time,type:event.type,id:event.id,val:0});events.sort((a,b)=>a.t-b.t);return JSON.stringify({name:this.draft.name,duration:this.draft.duration,events});}
@@ -1814,6 +1816,40 @@ ${translateUI('有未儲存的修改。切換前要如何處理？')}`),actions=
             // PointerManager prevents the native pointer click; keyboard activation still uses onclick.
             b.onclick=e=>{e.stopPropagation();if(e.detail===0)change();};this.app.signal.addEventListener('abort',clear,{once:true});return b;
         }
+        stickParts(action) {
+            if(this.editMode!=='simple'||action.start.type!=='axis'||!action.held)return [action];
+            const e=action.start,end=this.model.endTime(action);return this.model.actions().filter(a=>a.held&&a.start.type==='axis'&&Math.floor(a.start.id/2)===Math.floor(e.id/2)&&a.start.t===e.t&&this.model.endTime(a)===end);
+        }
+        editAction(action,method,value,shift=true,refs=[]) {
+            const parts=this.stickParts(action),others=parts.filter(a=>a.start!==action.start),old=action.start.t,oldEnd=this.model.endTime(action);
+            return this.model.atomic(action,()=>{
+                if(method==='remove'){for(const a of parts)this.model.remove(a);return;}
+                const target=method==='waitBefore'?this.model.waitAnchor(action,refs)+value:value;
+                this.model[method==='waitBefore'?'move':method](action,target,shift,[...refs,...others.map(a=>a.start)]);
+                for(const a of others)this.model[method==='duration'?'duration':'move'](a,method==='duration'?value:old+(action.start.t-old),false);
+                this.model.sync();
+            });
+        }
+        editorStick(parent,action) {
+            const e=action.start,base=Math.floor(e.id/2)*2,parts=()=>this.model.actions().filter(a=>a.held&&a.start.type==='axis'&&a.start.id>=base&&a.start.id<=base+1&&a.start.t===e.t&&this.model.endTime(a)===this.model.endTime(this.model.current(action))),read=id=>parts().find(a=>a.start.id===id)?.start.val||0;
+            const write=(x,y)=>this.model.atomic(action,()=>{
+                const until=this.model.endTime(this.model.current(action));
+                for(const [id,val] of [[base,x],[base+1,y]]){
+                    const own=parts().find(a=>a.start.id===id);
+                    if(own){own.start.val=val;continue;}
+                    if(this.model.actions().some(a=>a.held&&a.start.type==='axis'&&a.start.id===id&&a.start.t<until&&this.model.endTime(a)>e.t))throw new Error('同一按鍵或軸的動作不能重疊；請調整開始時間或持續時間。');
+                    this.model.addAction('axis',id,e.t,until-e.t,val);
+                }
+            });
+            const disk=el('div','stick-editor-disk'),dot=el('span','stick-editor-dot');disk.tabIndex=0;disk.setAttribute('role','group');setLabel(disk,'aria-label',()=>translateUI('拖曳調整搖桿方向與幅度'));disk.style.cssText='position:relative;width:160px;height:160px;border:1px solid #789;border-radius:50%;margin:8px auto;touch-action:none;background:linear-gradient(90deg,transparent 49.5%,#678 50%,transparent 50.5%),linear-gradient(transparent 49.5%,#678 50%,transparent 50.5%);';dot.style.cssText='position:absolute;width:18px;height:18px;border-radius:50%;background:#62d9ff;transform:translate(-50%,-50%);pointer-events:none';disk.append(dot);parent.append(disk);
+            const refresh=()=>{dot.style.left=`${50+read(base)*50}%`;dot.style.top=`${50+read(base+1)*50}%`;};
+            const apply=(x,y)=>{try{this.editChange(()=>write(x,y));refresh();this.refreshTimeline();this.updateStudioStatus();}catch(error){setText(this.editorMessage,()=>translateUI(error.message));}};
+            const at=event=>{const r=disk.getBoundingClientRect();let x=(event.clientX-r.left-r.width/2)/(r.width/2),y=(event.clientY-r.top-r.height/2)/(r.height/2),length=Math.hypot(x,y);if(length>1){x/=length;y/=length;}apply(Math.round(x*100)/100,Math.round(y*100)/100);};
+            this.app.pointers.bind(disk,event=>{this.historyGroup={};at(event);return{move:at,end:()=>{this.historyGroup=null;this.renderEditor();}};});
+            disk.onkeydown=event=>{const dirs={ArrowLeft:[-.01,0],ArrowRight:[.01,0],ArrowUp:[0,-.01],ArrowDown:[0,.01]};if(!dirs[event.key])return;event.preventDefault();const [x,y]=dirs[event.key];apply(clamp(read(base)+x,-1,1),clamp(read(base+1)+y,-1,1));};
+            for(const id of [base,base+1]){parent.append(el('strong','',id===base?'X':'Y'));const proxy={type:'axis',id,get val(){return read(id);},set val(value){write(id===base?value:read(base),id===base+1?value:read(base+1));refresh();}};this.editorValue(parent,proxy);}
+            refresh();
+        }
         editorValue(parent,event,release=null) {
             const row=el('div','edit-value');parent.append(row);
             if(event.type==='btn'&&event.id!==6&&event.id!==7){const b=button(()=>event.val>0?translateUI('按住'):translateUI('放開'),()=>{this.editChange(()=>event.val=event.val>0?0:1);this.renderEditor();});b.setAttribute('aria-pressed',String(event.val>0));row.append(b);return;}
@@ -1822,7 +1858,7 @@ ${translateUI('有未儲存的修改。切換前要如何處理？')}`),actions=
             const number=el('input');number.type='number';number.min=min;number.max=100;number.step=1;number.value=Math.round(event.val*100);number.classList.add('percent-input');setLabel(number,'aria-label',()=>translateUI(axis?'搖桿百分比':'油門／煞車百分比'));
             const error=el('span','field-error'),key=`${this.eventKey(event)}:value`;
             if(this.editErrors.has(key)){number.value=this.editErrors.get(key).raw;number.classList.add('edit-invalid');}
-            const apply=(percent,exact=null)=>{this.editChange(()=>event.val=exact??clamp(percent,min,100)/100);slider.value=event.val*100;number.value=Math.round(event.val*100);number.classList.remove('edit-invalid');number.setAttribute('aria-invalid','false');this.editErrors.delete(key);setText(error,()=>'');if(!this.editErrors.size)this.editorReady();this.refreshTimeline();this.updateStudioStatus();};
+            const apply=(percent,exact=null)=>{try{this.editChange(()=>event.val=exact??clamp(percent,min,100)/100);}catch(failure){setText(this.editorMessage,()=>translateUI(failure.message));return;}slider.value=event.val*100;number.value=Math.round(event.val*100);number.classList.remove('edit-invalid');number.setAttribute('aria-invalid','false');this.editErrors.delete(key);setText(error,()=>'');if(!this.editErrors.size)this.editorReady();this.refreshTimeline();this.updateStudioStatus();};
             const validate=()=>{const bad=number.value===''||!number.checkValidity();number.classList.toggle('edit-invalid',bad);number.setAttribute('aria-invalid',String(bad));setText(error,()=>bad?`${translateUI('有效範圍')} ${min}–100%`:'');if(bad)this.editErrors.set(key,{raw:number.value,owner:event,field:'value'});else this.editErrors.delete(key);return !bad;};
             number.oninput=()=>{validate();this.updateStudioStatus();};number.onchange=()=>{if(validate())apply(Number(number.value));};slider.onpointerdown=()=>{this.historyGroup={};};slider.onpointerup=slider.onpointercancel=()=>this.historyGroup=null;slider.oninput=()=>apply(Number(slider.value));
             const less=this.repeatButton('−',()=>apply(Math.round(event.val*100)-1)),more=this.repeatButton('+',()=>apply(Math.round(event.val*100)+1));setLabel(less,'aria-label',()=>translateUI('百分比減少 1'));setLabel(more,'aria-label',()=>translateUI('百分比增加 1'));
@@ -1832,7 +1868,7 @@ ${translateUI('有未儲存的修改。切換前要如何處理？')}`),actions=
         }
         renderTimeline(parent,rows) {
             const panel=el('div','macro-timeline'),tools=el('div','row');tools.append(el('strong','',()=>translateUI('動作時間軸')));
-            for(const [value,label] of [[1,'縮小'],[2,'放大'],[4,'再放大']])tools.append(button(()=>translateUI(label),()=>{this.timelineZoom=value;this.renderEditor();},(this.timelineZoom||1)===value?'on':''));panel.append(tools);setLabel(panel,'title',()=>translateUI('拖長條移動時間，拖右端改持續時間；重疊表示同時操作。'));
+            const zoom=value=>{this.timelineZoom=clamp(value,1,16);this.renderEditor();};const minus=button('−',()=>zoom((this.timelineZoom||1)/2)),plus=button('+',()=>zoom((this.timelineZoom||1)*2));minus.disabled=(this.timelineZoom||1)<=1;plus.disabled=(this.timelineZoom||1)>=16;setLabel(minus,'aria-label',()=>translateUI('縮小'));setLabel(plus,'aria-label',()=>translateUI('放大'));tools.append(minus,button(()=>translateUI('符合視窗'),()=>{this.timelineScroll=0;zoom(1);}),plus,el('span','meta',`${Math.round((this.timelineZoom||1)*100)}%`));panel.append(tools);setLabel(panel,'title',()=>translateUI('拖長條移動時間，拖右端改持續時間；重疊表示同時操作。'));
             const viewport=el('div','timeline-scroll'),canvas=el('div','timeline-canvas'),duration=Math.max(100,this.draft.duration),width=Math.max(200,Math.min(24000,Math.max(200,parent.clientWidth-84)*(this.timelineZoom||1))),scale=width/duration;
             canvas.style.width=`${width+66}px`;const ruler=el('div','timeline-ruler');ruler.style.marginLeft='66px';
             for(let i=0;i<=5;i++){const t=el('span','',`${(duration*i/5000).toFixed(1)} s`);t.style.left=`${i*width/5}px`;ruler.append(t);}canvas.append(ruler);
@@ -1853,7 +1889,7 @@ ${translateUI('有未儲存的修改。切換前要如何處理？')}`),actions=
                             next=resize?clamp(length+delta,1,86400000-old):clamp(old+delta,0,86400000-(held?length:0));
                             if(resize)bar.style.width=`${Math.max(24,next*scale)}px`;else bar.style.left=`${next*scale}px`;
                             setLabel(bar,'title',()=>`${(resize?old:next)/1000} – ${(resize?old+next:next+length)/1000} s`);
-                        },end:(_,cancelled)=>{if(cancelled){this.renderEditor();return;}try{if(moved)this.editChange(()=>{if(resize)this.model.duration(action,next,this.shiftFollowing);else this.model.move(action,next,this.shiftFollowing);});this.waitContext=null;this.selectedGap=null;this.selectedEvent=start;this.editPage=Math.floor(rows.indexOf(action)/20);this.renderEditor();}catch(error){this.renderEditor();setText(this.editorMessage,()=>translateUI(error.message));}}};
+                        },end:(_,cancelled)=>{if(cancelled){this.renderEditor();return;}try{if(moved)this.editChange(()=>{if(resize)this.editAction(action,'duration',next,this.shiftFollowing);else this.editAction(action,'move',next,this.shiftFollowing);});this.waitContext=null;this.selectedGap=null;this.selectedEvent=start;this.editPage=Math.floor(rows.indexOf(action)/20);this.renderEditor();}catch(error){this.renderEditor();setText(this.editorMessage,()=>translateUI(error.message));}}};
                     });track.append(bar);
                 }canvas.append(lane);
             }
@@ -1879,15 +1915,15 @@ ${translateUI('有未儲存的修改。切換前要如何處理？')}`),actions=
                 this.editorNumber(card,'等待時間',this.model,'wait',(gap.end-gap.start)/1000,0,86400,value=>{this.model.resizeGap(gap,value*1000);},()=> (gap.end-gap.start)/1000);
                 card.append(button(()=>translateUI('刪除等待'),()=>{try{this.editChange(()=>this.model.resizeGap(gap,0));this.selectedGap=null;this.renderEditor();}catch(error){setText(this.editorMessage,()=>translateUI(error.message));}},'danger'));inspector.append(card);
             }else if(this.selectedEvent){
-                const action=rows.find(a=>a.start===this.selectedEvent),e=action?.start;if(action){const index=rows.indexOf(action),card=el('section','edit-step');card.dataset.event=String(d.events.indexOf(e));card.append(el('h3','',()=>this.controlName(e)));
-                    this.editorNumber(card,'開始時間',e,'time',e.t/1000,0,86400,value=>this.model.move(action,value*1000,this.editMode==='simple'&&this.shiftFollowing,this.referencesFor(e)),()=>e.t/1000);
-                    if(action.held){this.editorNumber(card,'持續時間',e,'hold',(this.model.endTime(action)-e.t)/1000,.001,86400,value=>this.model.duration(action,value*1000,this.shiftFollowing,this.referencesFor(e)),()=> (this.model.endTime(this.model.current(action))-e.t)/1000);const presets=el('div','row duration-presets');for(const [ms,title] of [[80,'短按'],[100,'0.1 s'],[500,'0.5 s'],[1000,'1.0 s']])presets.append(button(()=>translateUI(title),()=>{try{this.editChange(()=>this.model.duration(action,ms,this.shiftFollowing,this.referencesFor(e)));this.editErrors.delete(`${this.eventKey(e)}:hold`);this.renderEditor();}catch(error){setText(this.editorMessage,()=>translateUI(error.message));}}));card.append(presets);}
-                    this.editorValue(card,e,action.end);
+                const action=rows.find(a=>a.start===this.selectedEvent),e=action?.start;if(action){const index=rows.indexOf(action),card=el('section','edit-step');card.dataset.event=String(d.events.indexOf(e));card.append(el('h3','',()=>e.type==='axis'&&this.editMode==='simple'?translateUI(e.id<2?'LS 左搖桿':'RS 右搖桿'):this.controlName(e)));
+                    this.editorNumber(card,'開始時間',e,'time',e.t/1000,0,86400,value=>this.editAction(action,'move',value*1000,this.editMode==='simple'&&this.shiftFollowing,this.referencesFor(e)),()=>e.t/1000);
+                    if(action.held){this.editorNumber(card,'持續時間',e,'hold',(this.model.endTime(action)-e.t)/1000,.001,86400,value=>this.editAction(action,'duration',value*1000,this.shiftFollowing,this.referencesFor(e)),()=> (this.model.endTime(this.model.current(action))-e.t)/1000);const presets=el('div','row duration-presets');for(const [ms,title] of [[80,'短按'],[100,'0.1 s'],[500,'0.5 s'],[1000,'1.0 s']])presets.append(button(()=>translateUI(title),()=>{try{this.editChange(()=>this.editAction(action,'duration',ms,this.shiftFollowing,this.referencesFor(e)));this.editErrors.delete(`${this.eventKey(e)}:hold`);this.renderEditor();}catch(error){setText(this.editorMessage,()=>translateUI(error.message));}}));card.append(presets);}
+                    if(e.type==='axis'&&action.held&&this.editMode==='simple')this.editorStick(card,action);else this.editorValue(card,e,action.end);
                     const advanced=el('details','inspector-advanced');advanced.open=!!this.inspectorAdvanced||this.focusError?.field==='gap';advanced.append(el('summary','',()=>translateUI('進階設定')));advanced.ontoggle=()=>this.inspectorAdvanced=advanced.open;
-                    if(this.editMode==='simple'){if(this.waitContext?.event!==e)this.waitContext={event:e,references:rows.slice(0,index).map(a=>a.start)};const refs=this.waitContext.references,anchor=()=>this.model.waitAnchor(action,refs);this.editorNumber(advanced,'前段間隔',e,'gap',(e.t-anchor())/1000,-86400,86400,value=>this.model.waitBefore(action,value*1000,this.shiftFollowing,refs),()=> (e.t-anchor())/1000);}
+                    if(this.editMode==='simple'){if(this.waitContext?.event!==e)this.waitContext={event:e,references:rows.slice(0,index).filter(a=>!this.stickParts(action).some(p=>p.start===a.start)).map(a=>a.start)};const refs=this.waitContext.references,anchor=()=>this.model.waitAnchor(action,refs);this.editorNumber(advanced,'前段間隔',e,'gap',(e.t-anchor())/1000,-86400,86400,value=>this.editAction(action,'waitBefore',value*1000,this.shiftFollowing,refs),()=> (e.t-anchor())/1000);}
                     const controls=el('div','row'),kind=el('select'),id=el('select');for(const [value,title] of [['btn','按鍵'],['axis','搖桿']]){const option=el('option','',()=>translateUI(title));option.value=value;kind.append(option);}kind.value=e.type;setLabel(kind,'aria-label',()=>translateUI('動作類型'));
                     (e.type==='btn'?LABELS:['LS X','LS Y','RS X','RS Y']).forEach((title,value)=>{const option=el('option','',()=>this.controlName({type:e.type,id:value}));option.value=value;id.append(option);});id.value=e.id;setLabel(id,'aria-label',()=>translateUI('按鍵／軸'));
-                    const changeControl=(type,control)=>{if(this.editErrors.size)return;if(action.held&&this.model.actions().some(a=>a.held&&a.start!==e&&a.start.type===type&&a.start.id===control&&e.t<this.model.endTime(a)&&this.model.endTime(action)>a.start.t)){kind.value=e.type;id.value=e.id;setText(this.editorMessage,()=>translateUI('同一按鍵或軸的動作不能重疊；請調整開始時間或持續時間。'));return;}this.editChange(()=>{if(action.held)this.model.ensureEnd(action);e.type=type;e.id=control;e.val=action.held?1:0;if(action.end){action.end.type=type;action.end.id=control;action.end.val=0;}});this.waitContext=null;this.renderEditor();};kind.onchange=()=>changeControl(kind.value,0);id.onchange=()=>changeControl(e.type,Number(id.value));controls.append(kind,id);advanced.append(controls);card.append(advanced,button(()=>translateUI('刪除動作'),()=>{if(this.editErrors.size)return;this.editChange(()=>this.model.remove(action));this.selectedEvent=null;this.renderEditor();},'danger'));inspector.append(card);
+                    const changeControl=(type,control)=>{if(this.editErrors.size)return;if(action.held&&this.model.actions().some(a=>a.held&&a.start!==e&&a.start.type===type&&a.start.id===control&&e.t<this.model.endTime(a)&&this.model.endTime(action)>a.start.t)){kind.value=e.type;id.value=e.id;setText(this.editorMessage,()=>translateUI('同一按鍵或軸的動作不能重疊；請調整開始時間或持續時間。'));return;}this.editChange(()=>{if(action.held)this.model.ensureEnd(action);e.type=type;e.id=control;e.val=action.held?1:0;if(action.end){action.end.type=type;action.end.id=control;action.end.val=0;}});this.waitContext=null;this.renderEditor();};kind.onchange=()=>changeControl(kind.value,0);id.onchange=()=>changeControl(e.type,Number(id.value));controls.append(kind,id);advanced.append(controls);card.append(advanced,button(()=>translateUI('刪除動作'),()=>{if(this.editErrors.size)return;this.editChange(()=>this.editAction(action,'remove'));this.selectedEvent=null;this.renderEditor();},'danger'));inspector.append(card);
                 }
             }else inspector.append(el('div','studio-empty',()=>translateUI('選取時間軸上的動作或等待區段，或按「＋ 新增」。')));
             if(pages>1){const nav=el('div','row');nav.append(button(()=>translateUI('上一頁'),()=>{if(this.editPage>0){this.editPage--;this.selectedGap=null;this.selectedEvent=rows[this.editPage*pageSize]?.start;this.renderEditor();}}),el('span','meta',`${this.editPage+1} / ${pages}`),button(()=>translateUI('下一頁'),()=>{if(this.editPage<pages-1){this.editPage++;this.selectedGap=null;this.selectedEvent=rows[this.editPage*pageSize]?.start;this.renderEditor();}}));inspector.append(nav);}
