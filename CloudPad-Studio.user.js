@@ -3,19 +3,19 @@
 // @homepageURL https://github.com/sl721225/CloudPad-Studio
 // @supportURL  https://github.com/sl721225/CloudPad-Studio/issues
 // @namespace    http://tampermonkey.net/
-// @version      15.4.1
+// @version      15.4.2
 // @updateURL    https://github.com/sl721225/CloudPad-Studio/releases/latest/download/CloudPad-Studio.user.js
 // @downloadURL  https://github.com/sl721225/CloudPad-Studio/releases/latest/download/CloudPad-Studio.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
 // @author       You
 // @match        *://*.xbox.com/*
-// @run-at       document-idle
+// @run-at       document-start
 // @grant        none
 // @noframes
 // ==/UserScript==
 
 /*
- * v15.4.1 — 可選背景繼續播放巨集；預設保留失焦全停。
+ * v15.4.2 — 背景巨集播放補上串流頁面失焦事件隔離；預設維持關閉。
  * 沿用既有 namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -26,11 +26,13 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.4.1';
+    const VERSION = '15.4.2';
     const APP_NAME = 'CloudPad Studio';
 
     // UI strings are separate from user macro/layout names and serialized input data.
     const EN = {
+    "背景播放中": "Playing in background",
+    "背景播放會攔截頁面的視窗失焦通知，避免串流端立即停用控制器；頁內輸入框切換不受影響。": "Background playback intercepts window focus-loss notifications to keep the stream controller active. Focus changes between inputs inside the page are unaffected.",
     "背景繼續播放巨集": "Keep macros playing in background",
     "關閉（離開視窗即停止）": "Off (stop when leaving the window)",
     "開啟（保留巨集播放）": "On (keep macro playback)",
@@ -1123,6 +1125,7 @@
                 if(!this.config.save()){this.p.backgroundMacro=previous;this.backgroundSelect.value=String(previous);return;}
                 if(this.app.backgrounded&&!this.p.backgroundMacro)this.app.suspend();};
             page.append(el('div','hint',()=>translateUI('僅保留已啟動的巨集播放；錄製、手動輸入、連發、鎖定與 AFK 仍停止。背景計時可能被瀏覽器降頻；最小化、休眠或串流暫停時無法保證遊戲收到輸入。')));
+            page.append(el('div','hint',()=>translateUI('背景播放會攔截頁面的視窗失焦通知，避免串流端立即停用控制器；頁內輸入框切換不受影響。')));
             this.selectSetting(page,()=>translateUI('連發間隔'),'delay',[100,200,500,1000,2000,3000,5000,10000].map(v=>[v,()=>(String(v/1000)+translateUI(" 秒"))]),()=>this.app.auto.restart());
             this.selectSetting(page,()=>translateUI('雙擊連發／三擊鎖定'),'comboTaps',[[false,()=>translateUI('關閉（防誤觸）')],[true,()=>translateUI('開啟')]]);
             this.selectSetting(page,()=>translateUI('AFK 擺頭幅度'),'afkAmp',[.1,.15,.2,.25,.3,.4,.5].map(v=>[v,`${Math.round(v*100)}%`]));
@@ -1321,13 +1324,13 @@
             const msg=m.recording?(m.started===null?translateUI('錄製已準備 · 等待第一次操作…'):(translateUI("錄製中 · ")+String(m.recordSource==='physical'?translateUI('實體手把'):translateUI('虛擬操作'))+" · "+String(((now-m.started)/1000).toFixed(1))+translateUI(" 秒"))):m.playing?(String(m.loop?translateUI('循環播放'):translateUI('播放中'))+translateUI(" · 槽位 ")+String(m.slot)):
                 (translateUI("槽位 ")+String(m.slot)+"："+String(this.p.macros[m.slot].events.length)+translateUI(" 筆 / ")+String((this.p.macros[m.slot].duration/1000).toFixed(1))+translateUI(" 秒"));
             if(this.macroStatus.textContent!==msg)setText(this.macroStatus,()=>msg);
-            const sig=JSON.stringify([...this.app.auto.modes].map(([id,v])=>[id,v.mode]))+this.app.racing.afk+m.playing+m.recording+m.slot;
+            const sig=JSON.stringify([...this.app.auto.modes].map(([id,v])=>[id,v.mode]))+this.app.racing.afk+m.playing+m.recording+m.slot+this.app.backgrounded;
             if(sig!==this.statusSignature){this.statusSignature=sig;this.refreshStatus();}
         }
         refreshStatus() {
             this.status.replaceChildren();for(const [id,m] of this.app.auto.modes)this.status.append(button(()=>`${LABELS[id]} ${m.mode==='hold'?translateUI('鎖定'):translateUI('連發')} ×`,()=>this.setMode(id,'none')));
             if(this.app.racing.afk)this.status.append(button(()=>'AFK ×',()=>{this.app.racing.stop();this.refresh();}));
-            const m=this.app.macro;if(m.playing||m.recording)this.status.append(button(()=>(translateUI("巨集 ")+String(m.slot)+" "+String(m.recording?translateUI('錄製'):translateUI('播放'))+" ■"),()=>{m.stop();this.refresh();}));
+            const m=this.app.macro;if(m.playing||m.recording)this.status.append(button(()=>(translateUI("巨集 ")+String(m.slot)+" "+String(m.recording?translateUI('錄製'):this.app.backgrounded?translateUI('背景播放中'):translateUI('播放'))+" ■"),()=>{m.stop();this.refresh();}));
             this.refreshRecordingControls();
             this.macroSlots.forEach((b,i)=>{const data=this.p.macros[i+1];b.classList.toggle('on',m.slot===i+1);setText(b,()=>`${i+1}${data.events.length?' •':''}${data.name?' '+data.name:''}`);setLabel(b,'title',()=>data.name||(translateUI("槽位 ")+String(i+1)));});
             this.macroName.disabled=this.importBtn.disabled=!!this.macroBusy();
@@ -1668,6 +1671,7 @@
             this.input.clear=key=>{this.shortcuts?.blocked.delete(key);rawClear(key);};
         }
         start() {
+            this.signal.addEventListener('abort',()=>startupGuard.abort(),{once:true});
             this.i18n=new I18n(this.config.prefs.language);
             this.host=el('div');this.host.id='bxg-v14-root';this.host.style.cssText='position:fixed;inset:0;pointer-events:none;z-index:2147483000;';
             this.host.lang=this.config.prefs.language;this.shadow=this.host.attachShadow({mode:'open'});const style=el('style');style.textContent=CSS;this.shadow.append(style);document.documentElement.append(this.host);
@@ -1686,7 +1690,7 @@
         }
         bindEvents() {
             window.addEventListener('keydown',e=>{if(e.code==='F2'&&!e.repeat&&!e.composedPath().some(n=>n?.matches?.('input,select,textarea,[contenteditable=true]'))){e.preventDefault();this.shortcut();}},{signal:this.signal});
-            window.addEventListener('blur',()=>this.leaveForeground(),{signal:this.signal});
+            window.addEventListener('blur',event=>{if(event.target===window)this.leaveForeground();},{signal:this.signal});
             window.addEventListener('focus',()=>{if(!document.hidden)this.returnForeground();},{signal:this.signal});
             document.addEventListener('visibilitychange',()=>{if(document.hidden)this.leaveForeground();else if(document.hasFocus())this.returnForeground();},{signal:this.signal});
             window.addEventListener('pagehide',()=>this.suspend(),{signal:this.signal});
@@ -1719,9 +1723,9 @@
             this.shortcuts?.blocked.clear();this.shortcuts?.holdSince.clear();
         }
         cancelBackgroundPump() {clearTimeout(this.backgroundTimer);this.backgroundTimer=null;}
-        returnForeground() {this.backgrounded=false;this.cancelBackgroundPump();}
+        returnForeground() {this.backgrounded=false;this.cancelBackgroundPump();this.panel?.refreshStatus();}
         leaveForeground() {
-            this.backgrounded=true;
+            this.backgrounded=true;this.shortcuts?.keyHeld.clear();this.shortcuts?.comboHeld.clear();
             if(!this.config.prefs.backgroundMacro||!this.macro.playing){this.suspend();return;}
             // Preserve only the macro source; never retain a finger, AFK or automated hold.
             this.pointers.cancelAll();this.panel.cancelTaps();this.auto.stop();this.racing.stop();
@@ -1876,6 +1880,20 @@
         module.exports={I18n,translateUI,ConfigStore,InputManager,VirtualGamepad,PhysicalGamepadMonitor,ButtonAutomation,MacroEngine,MacroBackup,MacroTimeline,ConfigurationBackup,InputPipeline,LayoutManager,PointerManager,RacingController,App};return;
     }
     if(window.top!==window.self)return;
+    // Install at document-start, before the stream registers its focus-loss handlers.
+    // Do not suppress anything until the user explicitly enables background playback.
+    const startupGuard=new AbortController();
+    window.addEventListener('blur',event=>{
+        const app=window.__CLOUDPAD_STUDIO__;
+        if(event.target!==window||!app||app.destroyed||!app.config.prefs.backgroundMacro||!app.macro.playing)return;
+        event.stopImmediatePropagation();app.focusGuardCount=(app.focusGuardCount||0)+1;app.leaveForeground();
+    },{capture:true,signal:startupGuard.signal});
+    window.addEventListener('focusout',event=>{
+        const app=window.__CLOUDPAD_STUDIO__;
+        if(app&&!app.destroyed&&app.config.prefs.backgroundMacro&&app.macro.playing&&event.relatedTarget===null&&!document.hasFocus()){
+            event.stopImmediatePropagation();app.leaveForeground();
+        }
+    },{capture:true,signal:startupGuard.signal});
     const boot=()=>{const previous=window.__CLOUDPAD_STUDIO__||window.__BXG_V14__;previous?.destroy?.();const app=new App();window.__CLOUDPAD_STUDIO__=app;window.__BXG_V14__=app;
         try{app.start();}catch(e){console.error(translateUI('[CloudPad Studio] 啟動失敗'),e);app.destroy();alert(translateUI('CloudPad Studio 啟動失敗，請查看 Console 並確認舊版已停用。'));}};
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot,{once:true});else boot();
