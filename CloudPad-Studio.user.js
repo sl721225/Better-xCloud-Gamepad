@@ -3,7 +3,7 @@
 // @homepageURL https://github.com/sl721225/CloudPad-Studio
 // @supportURL  https://github.com/sl721225/CloudPad-Studio/issues
 // @namespace    http://tampermonkey.net/
-// @version      15.4.3
+// @version      15.4.4
 // @updateURL    https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js
 // @downloadURL  https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
@@ -15,7 +15,7 @@
 // ==/UserScript==
 
 /*
- * v15.4.3 — Dev 更新頻道追蹤開發分支固定安裝檔；名稱標示 (Dev)。
+ * v15.4.4 — 失焦後殘留手動事件防護與可見停止原因；保留 Dev 自動更新。
  * 沿用既有 namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -26,13 +26,34 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.4.3';
+    const VERSION = '15.4.4';
     const APP_NAME = 'CloudPad Studio (Dev)';
     const UPDATE_CHANNEL='dev';
     const DEV_SCRIPT_URL='https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js';
 
     // UI strings are separate from user macro/layout names and serialized input data.
     const EN = {
+    "最後停止原因：": "Last stop reason: ",
+    "尚無停止紀錄": "No stop recorded",
+    "背景播放：": "Background playback: ",
+    "失焦（背景播放關閉）": "Focus lost (background playback off)",
+    "失焦時沒有播放中的巨集": "Focus lost with no macro playing",
+    "離線停止": "Stopped: offline",
+    "離開頁面停止": "Stopped: page hidden/unloaded",
+    "手動操作中斷": "Interrupted by manual input",
+    "按下停止": "Stop button",
+    "全停或切換功能": "Stop all / feature change",
+    "播放時間上限": "Playback time limit",
+    "單次播放完成": "Single playback completed",
+    "腳本被替換或重新初始化": "Script replaced or reinitialized",
+    "切換巨集槽位": "Macro slot changed",
+    "開始錄製": "Start recording",
+    "開始另一個巨集": "Start another macro",
+    "清除巨集": "Clear macro",
+    "其他停止指令": "Other stop command",
+    "關閉背景播放": "Background playback disabled",
+    "背景播放診斷": "Background playback diagnostics",
+    "失焦後殘留操作已忽略：": "Ignored late input after focus loss: ",
     "檢查開發版更新": "Check Dev updates",
     "開啟開發版安裝檔": "Open Dev userscript",
     "追蹤 v15-development 開發分支，可能包含未完成的修改。自動更新依腳本管理器設定執行；遊戲中不強制重載。": "Tracks the v15-development branch, which may include unfinished changes. Automatic updates follow your userscript manager settings; gameplay is never forcibly reloaded.",
@@ -410,6 +431,8 @@
         const version=header[1].match(/^\s*\/\/\s*@version\s+(\d+\.\d+\.\d+)\s*$/m)?.[1];
         if(!version)throw Error(translateUI('開發版更新資料無效。'));return version;
     };
+    const STOP_LABELS={"focus-off": "失焦（背景播放關閉）", "focus-idle": "失焦時沒有播放中的巨集", "offline": "離線停止", "pagehide": "離開頁面停止", "manual": "手動操作中斷", "button": "按下停止", "stop-all": "全停或切換功能", "time-limit": "播放時間上限", "complete": "單次播放完成", "destroy": "腳本被替換或重新初始化", "slot": "切換巨集槽位", "record": "開始錄製", "play": "開始另一個巨集", "clear": "清除巨集", "stop-command": "其他停止指令", "disabled": "關閉背景播放"};
+    const stopLabel=code=>translateUI(STOP_LABELS[code]||STOP_LABELS["stop-command"]);
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, Number.isFinite(Number(v)) ? Number(v) : 0));
     const clone = value => JSON.parse(JSON.stringify(value));
     const slots = factory => Object.fromEntries(Array.from({length: 6}, (_, i) => [i + 1, factory()]));
@@ -624,9 +647,9 @@
             this.loop=false; this.started=null; this.events=[]; this.last=blank(); this.index=0;
             input.onChange=()=>this.capture();
         }
-        select(slot) {this.stop(); this.slot=slot;}
+        select(slot) {this.stop('slot'); this.slot=slot;}
         record(getState=null,{source='virtual',physicalIndex=null}={}) {
-            this.stop();this.recordState=getState||(()=>this.input.recordingState());this.recordSource=source;this.physicalIndex=physicalIndex;
+            this.stop('record');this.recordState=getState||(()=>this.input.recordingState());this.recordSource=source;this.physicalIndex=physicalIndex;
             this.recording=true; this.started=null; this.events=[]; this.last=blank(); this.capture();
         }
         capture(force=false) {
@@ -648,11 +671,15 @@
                 this.config.prefs.macros[this.slot]={name:this.config.prefs.macros[this.slot].name||'',duration,events:clone(this.events)}; this.config.save();
             }
         }
-        stopPlayback() {this.playing=false; this.loop=false; this.input.clear('macro');}
-        stop() {this.stopRecording();this.stopPlayback();}
-        clear() {this.stop(); this.config.prefs.macros[this.slot]={name:'',duration:0,events:[]}; this.config.save();}
+        stopPlayback(reason='stop-command') {
+            if(this.playing)this.lastStop={reason,at:Date.now(),slot:this.slot,
+                callers:(new Error().stack||'').split('\n').slice(2,7).map(line=>line.trim().split(' (')[0].replace(/https?:\/\/\S+/g,'[script]'))};
+            this.playing=false;this.loop=false;this.input.clear('macro');
+        }
+        stop(reason='stop-command') {this.stopRecording();this.stopPlayback(reason);}
+        clear() {this.stop('clear'); this.config.prefs.macros[this.slot]={name:'',duration:0,events:[]}; this.config.save();}
         play(loop=false) {
-            this.stop(); const m=this.config.prefs.macros[this.slot]; if(!m.events.length) return false;
+            this.stop('play'); const m=this.config.prefs.macros[this.slot]; if(!m.events.length) return false;
             this.data=clone(m); this.data.duration=Math.max(1,this.data.duration,this.data.events.at(-1).t);
             this.speed=this.config.prefs.macroSpeed||1;this.playing=true;this.loop=loop;this.index=0;this.playStart=this.clock();this.runStart=this.playStart;this.tick(this.playStart);return true;
         }
@@ -666,7 +693,7 @@
             while(this.index<this.data.events.length&&this.data.events[this.index].t<=elapsed) {
                 const e=this.data.events[this.index++]; this.input.set('macro',e.type,e.id,e.val,30);
             }
-            if(elapsed>=this.data.duration&&!this.loop) this.stopPlayback();
+            if(elapsed>=this.data.duration&&!this.loop) this.stopPlayback('complete');
         }
     }
 
@@ -824,7 +851,7 @@
         }
         tick(now) {
             const a=this.app,p=a.config.prefs;
-            if(p.playbackLimit&&a.macro.playing&&now-a.macro.runStart>=p.playbackLimit*1000){a.macro.stop();a.notice(translateUI('巨集已達播放時間上限，已停止。'));}
+            if(p.playbackLimit&&a.macro.playing&&now-a.macro.runStart>=p.playbackLimit*1000){a.macro.stop('time-limit');a.notice(translateUI('巨集已達播放時間上限，已停止。'));}
             const present=new Set();
             for(const [key,state] of a.input.sources){
                 if(!/^(manual:|race:)/.test(key))continue;present.add(key);
@@ -895,11 +922,11 @@
     class RacingController {
         constructor(app) {this.app=app;this.afk=false;this.left=null;this.right=null;}
         start(side,e) {
-            if(this[side])return null;this.app.manualStart();
+            if(this[side])return null;if(this.app.manualStart()===false)return null;
             const key=`race:${e.pointerId}`;const s={x:e.clientX,y:e.clientY,dx:0,dy:0,ratio:0,pressed:false,flick:false};this[side]=s;
             if(side==='left')this.app.input.set(key,'axis',0,0);
             return {move:ev=>{
-                this.app.manualStart();const dx=ev.clientX-s.x,dy=ev.clientY-s.y;
+                if(this.app.manualStart()===false)return null;const dx=ev.clientX-s.x,dy=ev.clientY-s.y;
                 if(side==='left') {
                     s.dx=clamp(dx,-55,55);this.app.input.set(key,'axis',0,s.dx/55);
                     const down=dy>40;if(down&&!s.pressed)this.app.vibrate(30);s.pressed=down;
@@ -1139,13 +1166,13 @@
             this.backgroundSelect=this.selectSetting(page,()=>translateUI('背景繼續播放巨集'),'backgroundMacro',[[false,()=>translateUI('關閉（離開視窗即停止）')],[true,()=>translateUI('開啟（保留巨集播放）')]]);
             this.backgroundSelect.onchange=()=>{const previous=this.p.backgroundMacro;this.p.backgroundMacro=this.backgroundSelect.value==='true';
                 if(!this.config.save()){this.p.backgroundMacro=previous;this.backgroundSelect.value=String(previous);return;}
-                if(this.app.backgrounded&&!this.p.backgroundMacro)this.app.suspend();};
+                if(this.app.backgrounded&&!this.p.backgroundMacro)this.app.suspend('disabled');};
             page.append(el('div','hint',()=>translateUI('僅保留已啟動的巨集播放；錄製、手動輸入、連發、鎖定與 AFK 仍停止。背景計時可能被瀏覽器降頻；最小化、休眠或串流暫停時無法保證遊戲收到輸入。')));
             page.append(el('div','hint',()=>translateUI('背景播放會攔截頁面的視窗失焦通知，避免串流端立即停用控制器；頁內輸入框切換不受影響。')));
             this.selectSetting(page,()=>translateUI('連發間隔'),'delay',[100,200,500,1000,2000,3000,5000,10000].map(v=>[v,()=>(String(v/1000)+translateUI(" 秒"))]),()=>this.app.auto.restart());
             this.selectSetting(page,()=>translateUI('雙擊連發／三擊鎖定'),'comboTaps',[[false,()=>translateUI('關閉（防誤觸）')],[true,()=>translateUI('開啟')]]);
             this.selectSetting(page,()=>translateUI('AFK 擺頭幅度'),'afkAmp',[.1,.15,.2,.25,.3,.4,.5].map(v=>[v,`${Math.round(v*100)}%`]));
-            this.afkBtn=button(()=>translateUI('啟動 AFK 擺頭'),()=>{this.app.manualStart();this.app.racing.afk=!this.app.racing.afk;this.app.racing.tick(this.app.clock());this.refresh();});page.append(this.afkBtn);
+            this.afkBtn=button(()=>translateUI('啟動 AFK 擺頭'),()=>{if(this.app.manualStart()===false)return null;this.app.racing.afk=!this.app.racing.afk;this.app.racing.tick(this.app.clock());this.refresh();});page.append(this.afkBtn);
             this.selectSetting(page,()=>translateUI('控制面板大小'),'uiScale',[.8,1,1.2,1.5].map(v=>[v,`${Math.round(v*100)}%`]));
             this.selectSetting(page,()=>translateUI('控制面板背景'),'bgTrans',[[false,()=>translateUI('半透明')],[true,()=>translateUI('透明')]]);
             this.selectSetting(page,()=>translateUI('觸控操作時面板淡化'),'touchAutoFade',[[true,()=>translateUI('開啟（25%）')],[false,()=>translateUI('關閉')]]);
@@ -1186,14 +1213,16 @@
                 icon.innerHTML=shapes[kind];b.append(icon,el('span','',()=>translateUI(label)));return b;
             };
             const row=el('div','macro-actions');this.recordButton=action('record',translateUI('錄製'),()=>this.app.startRecording());
-            this.stopButton=action('stop',translateUI('停止'),()=>{this.app.macro.stop();this.refresh();});
+            this.stopButton=action('stop',translateUI('停止'),()=>{this.app.macro.stop('button');this.refresh();});
             this.playButton=action('play',translateUI('播放'),()=>this.app.playMacro(false));this.loopButton=action('loop',translateUI('循環播放'),()=>this.app.playMacro(true));
             row.append(this.recordButton,this.playButton,this.loopButton,this.stopButton);
             const clearRow=el('div','row');clearRow.append(button(()=>translateUI('清除'),()=>{if(ask(translateUI('清除此巨集槽位？'))){this.app.macro.clear();this.refresh();}},'danger'));
             const nameRow=el('label','setting');nameRow.append(el('span','',()=>translateUI('巨集名稱')));this.macroName=el('input');this.macroName.type='text';this.macroName.maxLength=60;
             this.macroName.onchange=()=>{if(this.macroBusy())return;const macro=this.p.macros[this.app.macro.slot],old=macro.name;macro.name=this.macroName.value.trim();if(!this.config.save()){macro.name=old;setText(this.backupMessage,()=>translateUI('名稱儲存失敗。'));}this.refreshStatus();};nameRow.append(this.macroName);
-            this.macroStatus=el('div','meta');
-            page.append(slotsRow,nameRow,el('div','meta',()=>translateUI('錄製來源')),sourceRow,this.recordSourceState,row,clearRow,this.macroStatus,
+            this.macroStatus=el('div','meta');this.macroStopReason=el('div','meta');
+            this.macroDebug=el('details');this.macroDebug.append(el('summary','meta',()=>translateUI('背景播放診斷')));
+            this.macroDebugText=el('pre','backup-message');this.macroDebug.append(this.macroDebugText);
+            page.append(slotsRow,nameRow,el('div','meta',()=>translateUI('錄製來源')),sourceRow,this.recordSourceState,row,clearRow,this.macroStatus,this.macroStopReason,this.macroDebug,
                 el('div','hint',()=>translateUI('第一次操作才開始計時；按下停止前的等待也會保存。實體錄製只讀取開始時選定的手把，保留按鍵、搖桿與 LT／RT 深度；播放時套用目前映射與曲線。')),this.backupPage());
             return page;
         }
@@ -1273,14 +1302,14 @@
         openTab(tab) {if(this.app.layout.editing&&tab!=='layout'){this.app.pointers.cancelAll();this.app.layout.editing=false;}
             this.tab=tab;if(tab)this.collapsed=false;this.refresh();
             if(tab==='diagnostics'){this.app.override=false;this.app.updateVisibility();}}
-        setMode(id,mode) {this.app.manualStart();this.app.auto.set(id,mode);this.refresh();}
+        setMode(id,mode) {if(this.app.manualStart()===false)return null;this.app.auto.set(id,mode);this.refresh();}
         createKey(id,width=44,height=32) {
             const node=el('button','padkey',()=>LABELS[id]);node.type='button';node.dataset.id=id;node.dataset.mode='none';
             node.style.width=`${width}px`;node.style.height=`${height}px`;setLabel(node,'title',()=>(String(LABELS[id])+translateUI("：右鍵切換連發／鎖定")));
             this.app.layout.register(String(id),node);this.buttons.push({id,node});
             this.app.pointers.bind(node,e=>{
                 if(this.app.layout.editing) return this.app.layout.drag(String(id),e,this.app.touch?.active?this.app.touch.scale:this.effectiveScale);
-                this.app.manualStart();const source=`manual:${e.pointerId}`;this.app.input.set(source,'btn',id,1);
+                if(this.app.manualStart()===false)return null;const source=`manual:${e.pointerId}`;this.app.input.set(source,'btn',id,1);
                 const combo=this.p.comboTaps&&this.p.gameMode==='standard';let taps=this.tapStates.get(id);
                 if(!taps){taps={count:0,last:-Infinity,due:null};this.tapStates.set(id,taps);}
                 if(combo){const now=this.app.clock();taps.count=now-taps.last<300?taps.count+1:1;taps.last=now;taps.due=null;}
@@ -1304,10 +1333,10 @@
             let active=false;
             this.app.pointers.bind(base,e=>{
                 if(this.app.layout.editing)return this.app.layout.drag(`stick_${axis}`,e,this.app.touch?.active?this.app.touch.scale:this.effectiveScale);
-                if(active)return null;active=true;this.app.manualStart();const source=`manual:${e.pointerId}`;
+                if(active)return null;if(this.app.manualStart()===false)return null;active=true;const source=`manual:${e.pointerId}`;
                 const rect=base.getBoundingClientRect();const scale=rect.width/base.offsetWidth;
                 const radius=(base.clientWidth-knob.offsetWidth)/2*scale;
-                const move=ev=>{this.app.manualStart();let x=(ev.clientX-rect.left-rect.width/2)/radius,y=(ev.clientY-rect.top-rect.height/2)/radius;
+                const move=ev=>{if(this.app.manualStart()===false)return null;let x=(ev.clientX-rect.left-rect.width/2)/radius,y=(ev.clientY-rect.top-rect.height/2)/radius;
                     const d=Math.max(1,Math.hypot(x,y));this.app.input.set(source,'axis',axis,x/d);this.app.input.set(source,'axis',axis+1,y/d);};
                 move(e);return {move,end:()=>{active=false;this.app.input.clear(source);}};
             });
@@ -1340,13 +1369,19 @@
             const msg=m.recording?(m.started===null?translateUI('錄製已準備 · 等待第一次操作…'):(translateUI("錄製中 · ")+String(m.recordSource==='physical'?translateUI('實體手把'):translateUI('虛擬操作'))+" · "+String(((now-m.started)/1000).toFixed(1))+translateUI(" 秒"))):m.playing?(String(m.loop?translateUI('循環播放'):translateUI('播放中'))+translateUI(" · 槽位 ")+String(m.slot)):
                 (translateUI("槽位 ")+String(m.slot)+"："+String(this.p.macros[m.slot].events.length)+translateUI(" 筆 / ")+String((this.p.macros[m.slot].duration/1000).toFixed(1))+translateUI(" 秒"));
             if(this.macroStatus.textContent!==msg)setText(this.macroStatus,()=>msg);
+            const last=m.lastStop;
+            setText(this.macroStopReason,()=>translateUI('背景播放：')+translateUI(this.p.backgroundMacro?'開啟':'關閉')+' · '+translateUI('最後停止原因：')+(last?stopLabel(last.reason)+' · '+new Date(last.at).toLocaleTimeString():translateUI('尚無停止紀錄')));
+            if(this.macroDebug.open)setText(this.macroDebugText,()=>JSON.stringify({version:VERSION,backgroundOption:this.p.backgroundMacro,
+                playing:m.playing,loop:m.loop,backgrounded:!!this.app.backgrounded,hasFocus:document.hasFocus(),hidden:document.hidden,
+                ignoredLateInput:this.app.ignoredBackgroundInput||0,focusGuards:this.app.focusGuardCount||0,timerActive:this.app.backgroundTimer!=null,
+                lastStop:m.lastStop||null},null,2));
             const sig=JSON.stringify([...this.app.auto.modes].map(([id,v])=>[id,v.mode]))+this.app.racing.afk+m.playing+m.recording+m.slot+this.app.backgrounded;
             if(sig!==this.statusSignature){this.statusSignature=sig;this.refreshStatus();}
         }
         refreshStatus() {
             this.status.replaceChildren();for(const [id,m] of this.app.auto.modes)this.status.append(button(()=>`${LABELS[id]} ${m.mode==='hold'?translateUI('鎖定'):translateUI('連發')} ×`,()=>this.setMode(id,'none')));
             if(this.app.racing.afk)this.status.append(button(()=>'AFK ×',()=>{this.app.racing.stop();this.refresh();}));
-            const m=this.app.macro;if(m.playing||m.recording)this.status.append(button(()=>(translateUI("巨集 ")+String(m.slot)+" "+String(m.recording?translateUI('錄製'):this.app.backgrounded?translateUI('背景播放中'):translateUI('播放'))+" ■"),()=>{m.stop();this.refresh();}));
+            const m=this.app.macro;if(m.playing||m.recording)this.status.append(button(()=>(translateUI("巨集 ")+String(m.slot)+" "+String(m.recording?translateUI('錄製'):this.app.backgrounded?translateUI('背景播放中'):translateUI('播放'))+" ■"),()=>{m.stop('button');this.refresh();}));
             this.refreshRecordingControls();
             this.macroSlots.forEach((b,i)=>{const data=this.p.macros[i+1];b.classList.toggle('on',m.slot===i+1);setText(b,()=>`${i+1}${data.events.length?' •':''}${data.name?' '+data.name:''}`);setLabel(b,'title',()=>data.name||(translateUI("槽位 ")+String(i+1)));});
             this.macroName.disabled=this.importBtn.disabled=!!this.macroBusy();
@@ -1713,8 +1748,8 @@
             window.addEventListener('blur',event=>{if(event.target===window)this.leaveForeground();},{signal:this.signal});
             window.addEventListener('focus',()=>{if(!document.hidden)this.returnForeground();},{signal:this.signal});
             document.addEventListener('visibilitychange',()=>{if(document.hidden)this.leaveForeground();else if(document.hasFocus())this.returnForeground();},{signal:this.signal});
-            window.addEventListener('pagehide',()=>this.suspend(),{signal:this.signal});
-            window.addEventListener('offline',()=>{this.suspend();this.notice(translateUI('網路已離線，已釋放所有虛擬輸入。'));},{signal:this.signal});
+            window.addEventListener('pagehide',()=>this.suspend('pagehide'),{signal:this.signal});
+            window.addEventListener('offline',()=>{this.suspend('offline');this.notice(translateUI('網路已離線，已釋放所有虛擬輸入。'));},{signal:this.signal});
             window.addEventListener('resize',()=>{this.pointers.cancelAll();this.panel.refresh();this.viewer.resize();this.racingView.resize();},{signal:this.signal});
             document.addEventListener('pointerdown',e=>{
                 if(this.popupNode&&!e.composedPath().includes(this.popupNode))this.closePopup();
@@ -1733,10 +1768,15 @@
                 this.panel.refresh();this.viewer.resize();this.racingView.resize();
             },{signal:this.signal});
         }
-        manualStart() {this.macro.stopPlayback();this.manualUntil=this.clock()+2500;this.override=false;}
+        manualStart() {
+            if(this.config.prefs.backgroundMacro&&this.macro.playing&&!document.hasFocus()){
+                this.ignoredBackgroundInput=(this.ignoredBackgroundInput||0)+1;return false;
+            }
+            this.macro.stopPlayback('manual');this.manualUntil=this.clock()+2500;this.override=false;return true;
+        }
         vibrate(pattern) {try{navigator.vibrate?.(pattern);}catch{}}
-        stopAll() {
-            this.cancelBackgroundPump();this.macro.stop();this.pointers.cancelAll();this.panel?.cancelTaps();this.auto.stop();this.racing.stop();this.input.clearAll();
+        stopAll(reason='stop-all') {
+            this.cancelBackgroundPump();this.macro.stop(reason);this.pointers.cancelAll();this.panel?.cancelTaps();this.auto.stop();this.racing.stop();this.input.clearAll();
             this.lastRaceContact=-Infinity;this.panelPointers.clear();this.panelWakeUntil=-Infinity;
             if(this.panel)this.updatePanelFade(this.clock());
             this.panel?.refreshStatus();
@@ -1746,7 +1786,7 @@
         returnForeground() {this.backgrounded=false;this.cancelBackgroundPump();this.panel?.refreshStatus();}
         leaveForeground() {
             this.backgrounded=true;this.shortcuts?.keyHeld.clear();this.shortcuts?.comboHeld.clear();
-            if(!this.config.prefs.backgroundMacro||!this.macro.playing){this.suspend();return;}
+            if(!this.config.prefs.backgroundMacro||!this.macro.playing){this.suspend(this.config.prefs.backgroundMacro?'focus-idle':'focus-off');return;}
             // Preserve only the macro source; never retain a finger, AFK or automated hold.
             this.pointers.cancelAll();this.panel.cancelTaps();this.auto.stop();this.racing.stop();
             for(const key of [...this.input.sources.keys()])if(key!=='macro')this.input.clear(key);
@@ -1762,13 +1802,13 @@
                 this.backgroundTimer=null;
                 if(this.destroyed||!this.backgrounded||!this.config.prefs.backgroundMacro||!this.macro.playing)return;
                 const now=this.clock(),limit=this.config.prefs.playbackLimit;
-                if(limit&&now-this.macro.runStart>=limit*1000){this.macro.stop();this.notice(translateUI('巨集已達播放時間上限，已停止。'));}
+                if(limit&&now-this.macro.runStart>=limit*1000){this.macro.stop('time-limit');this.notice(translateUI('巨集已達播放時間上限，已停止。'));}
                 else this.macro.tick(now);
                 this.virtual.sync(this.virtual.readPhysical());
                 this.scheduleBackgroundPump();
             },30);
         }
-        suspend() {this.cancelBackgroundPump();this.stopAll();this.override=false;this.closePopup();this.updateVisibility();}
+        suspend(reason='stop-all') {this.cancelBackgroundPump();this.stopAll(reason);this.override=false;this.closePopup();this.updateVisibility();}
 
         changeModeAfterRestore() {
             const p=this.config.prefs;
@@ -1889,7 +1929,7 @@
             this.racingView.render();this.raf=requestAnimationFrame(()=>this.loop());
         }
         destroy() {
-            this.destroyed=true;cancelAnimationFrame(this.raf);this.stopAll();this.abort.abort();this.virtual.destroy();this.i18n?.destroy();this.host?.remove();
+            this.destroyed=true;cancelAnimationFrame(this.raf);this.stopAll('destroy');this.abort.abort();this.virtual.destroy();this.i18n?.destroy();this.host?.remove();
             if(window.__BXG_V14__===this)delete window.__BXG_V14__;
             if(window.__CLOUDPAD_STUDIO__===this)delete window.__CLOUDPAD_STUDIO__;
         }
