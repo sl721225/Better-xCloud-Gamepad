@@ -6,11 +6,11 @@
 
 ## 版本
 - 正式版：CloudPad Studio v15.3.0，見 [Releases](https://github.com/sl721225/CloudPad-Studio/releases/latest)。
-- 開發分支：v15-development；目前為 v15.4.2，補上背景巨集的頁面失焦相容處理；更新後須重新整理 xCloud。
+- 開發分支：v15-development；目前為 CloudPad Studio (Dev) v15.4.3，開發版可追蹤開發分支自動更新。
 
 ## 安裝／改名升級
 1. 在 Tampermonkey 或 Violentmonkey 打開原有腳本的編輯器。
-2. 用 CloudPad-Studio.user.js 或 CloudPad-Studio-v15.4.2.txt 的完整內容取代原有程式，儲存。
+2. 用 CloudPad-Studio.user.js 或 CloudPad-Studio-v15.4.3.txt 的完整內容取代原有程式，儲存。
 3. 重新整理 Xbox 頁面。
 4. 確認只有一份 CloudPad Studio 啟用。若另裝成新腳本，先停用舊版，避免兩個手把輸出同時運作。
 
@@ -27,3 +27,6 @@ GitHub 倉庫已改名為 CloudPad-Studio；舊倉庫網址由 GitHub 重新導�
 
 ## Language / 語言
 在設定最上方選擇「繁體中文 / English」，立即生效並保存。既有使用者保留繁體中文，新使用者依瀏覽器語言預選。切換不會停止錄製或播放、不會丟失巨集編輯草稿；自訂名稱保持原樣。
+
+## Dev 更新來源
+開發版名稱為 `CloudPad Studio (Dev)`，腳本管理器更新來源為 `v15-development/CloudPad-Studio.user.js` 的固定 raw 網址。首次請在原腳本編輯器取代完整新版並儲存；後續檢查依管理器設定執行。介面內的「檢查開發版更新」也使用相同來源，只提示、不自動覆寫。正式 Release 另行維持穩定更新來源。
