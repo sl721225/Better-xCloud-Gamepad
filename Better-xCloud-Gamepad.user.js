@@ -3,7 +3,7 @@
 // @homepageURL https://github.com/sl721225/CloudPad-Studio
 // @supportURL  https://github.com/sl721225/CloudPad-Studio/issues
 // @namespace    http://tampermonkey.net/
-// @version      15.6.0
+// @version      15.6.1
 // @updateURL    https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js
 // @downloadURL  https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
@@ -15,7 +15,7 @@
 // ==/UserScript==
 
 /*
- * v15.6.0 — 分軌長條時間軸、持續類比輸入、帶正負值與加減鈕的百分比控制。
+ * v15.6.1 — 修正前段等待拉長上一個按鍵，加入真正的空白等待與等待軌道。
  * 沿用既有 namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
@@ -26,7 +26,7 @@
  */
 (function () {
     'use strict';
-    const VERSION = '15.6.0';
+    const VERSION = '15.6.1';
     const APP_NAME = 'CloudPad Studio (Dev)';
     const UPDATE_CHANNEL='dev';
     const DEV_SCRIPT_URL='https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js';
@@ -411,6 +411,7 @@
     EN['短按（原始時間保留）']='Short press (original timing preserved)';
     Object.assign(EN,{"動作時間軸": "Action timeline", "縮小": "Fit", "放大": "Zoom in", "再放大": "Zoom further", "拖長條移動時間，拖右端改持續時間；重疊表示同時操作。": "Drag a bar to move it; drag its right edge to change duration. Overlapping bars play together.", "拖曳持續時間": "Resize duration", "新增動作以建立時間軸。": "Add an action to create a timeline.", "搖桿百分比": "Stick percentage", "油門／煞車百分比": "Trigger percentage", "百分比減少 1": "Decrease percentage by 1", "百分比增加 1": "Increase percentage by 1", "負＝左 · 0＝回中 · 正＝右": "Negative = left · 0 = center · positive = right", "負＝上 · 0＝回中 · 正＝下": "Negative = up · 0 = center · positive = down", "0＝放開 · 100＝全按": "0 = released · 100 = fully pressed", "持續時間必須大於零，結束不得超過 24 小時。": "Duration must be positive and end within 24 hours.", "此按鍵後面已有其他動作，請縮短時間或開啟連同後續一起移動。": "This control has a later action. Shorten this action or enable moving subsequent actions.", "結束不得超過 24 小時。": "The end must be within 24 hours."});
     Object.assign(EN,{'＋ 同時新增':'+ Add simultaneous action','事件較多，時間軸顯示目前頁面的動作；使用下方翻頁查看其餘動作。':'For large recordings, the timeline shows the current page. Use the page controls below to inspect more actions.'});
+    Object.assign(EN,{"等待": "Wait", "空白等待": "Neutral wait", "插入空白等待": "Insert neutral wait", "在此動作前留白；跨越等待的長按會先放開，等待後再繼續。": "Insert a neutral interval before this action. Holds crossing the interval are released, then resumed.", "等待時間必須是非負數。": "Wait time must be non-negative.", "等待時間必須大於零，總時長不得超過 24 小時。": "Wait time must be positive and the total must be within 24 hours."});
     const EN_KEYS = new Map(Object.entries(EN).map(([zh,en])=>[en,zh]));
     let uiLanguage='zh-TW',activeI18n=null;
     const translateUI = text => {if(typeof text==='function')return translateUI(text());if(typeof text!=='string')return text;const key=EN_KEYS.get(text)||text;return uiLanguage==='en'?(EN[key]??key):key;};
@@ -860,13 +861,41 @@
             const e={t:time,type:action.start.type,id:action.start.id,val:0},at=action.boundary?this.data.events.indexOf(action.boundary):-1;
             if(at<0)this.data.events.push(e);else this.data.events.splice(at,0,e);this.implicitEnds.delete(action.start);action.end=e;return e;
         }
+        shiftActions(threshold,delta,except) {
+            // Move whole later actions, never the release of a previous hold sharing the boundary.
+            const events=new Set(),implicit=[];
+            for(const a of this.actions())if(a.start!==except&&a.start.t>=threshold){events.add(a.start);if(a.end)events.add(a.end);if(this.implicitEnds.has(a.start))implicit.push(a.start);}
+            for(const e of events)e.t+=delta;
+            for(const e of implicit)this.implicitEnds.set(e,this.implicitEnds.get(e)+delta);
+        }
+        waitAnchor(action) {
+            let end=0;for(const a of this.actions()){if(a.start===action.start)break;end=Math.max(end,a.held?this.endTime(a):a.start.t);}return end;
+        }
+        waitBefore(action,value,shift=true) {
+            if(!Number.isFinite(value)||value<0)throw Error(translateUI('等待時間必須是非負數。'));
+            this.move(action,this.waitAnchor(action)+value,shift);
+        }
+        insertWait(time,value) {
+            if(!Number.isFinite(time)||!Number.isFinite(value)||time<0||time>this.data.duration||value<=0||this.data.duration+value>86400000)throw Error(translateUI('等待時間必須大於零，總時長不得超過 24 小時。'));
+            // At the cut, existing releases belong to the preceding action; new presses belong after the wait.
+            const ordered=this.data.events.map((e,i)=>({e,i})).sort((a,b)=>a.e.t-b.e.t||a.i-b.i),state=new Map();
+            for(const {e} of ordered)if(e.t<time||(e.t===time&&e.val===0))state.set(`${e.type}:${e.id}`,e);
+            const across=[...state.values()].filter(e=>e.val!==0&&(this.implicitEnds.get(e)??Infinity)>time);
+            if(this.data.events.length+across.length*2>MacroBackup.MAX_EVENTS)throw Error(translateUI('已達事件上限。'));
+            const starts=new Set(ordered.filter(({e})=>e.t===time&&e.val!==0).map(({e})=>`${e.type}:${e.id}`)),total=this.data.duration;
+            for(const e of this.data.events)if(e.t>time||(e.t===time&&e.val!==0))e.t+=value;
+            for(const [e,end] of this.implicitEnds)if(end>time||e.t>=time+value)this.implicitEnds.set(e,end+value);
+            const extra=[];for(const e of across){extra.push({t:time,type:e.type,id:e.id,val:0});if(!starts.has(`${e.type}:${e.id}`)){const resume={t:time+value,type:e.type,id:e.id,val:e.val};extra.push(resume);if(this.implicitEnds.has(e)){this.implicitEnds.set(resume,this.implicitEnds.get(e));this.implicitEnds.delete(e);}}}
+            // Restored state comes before any original change at the resume timestamp.
+            this.data.events=[...extra,...this.data.events].sort((a,b)=>a.t-b.t);
+            this.tail=Math.max(0,total+value-this.last());this.sync();
+        }
         duration(action,value,shift=true) {
             const oldEnd=this.endTime(action),oldTotal=this.data.duration,implicit=!action.end&&!action.boundary,delta=action.start.t+value-oldEnd;
             if(!Number.isFinite(value)||value<=0||action.start.t+value>86400000)throw Error(translateUI('持續時間必須大於零，結束不得超過 24 小時。'));
             if(!shift&&action.next&&action.start.t+value>action.next.t)throw Error(translateUI('此按鍵後面已有其他動作，請縮短時間或開啟連同後續一起移動。'));
             if(shift&&Math.max(this.last()+delta,action.start.t+value)+this.tail>86400000)throw Error(translateUI('結束不得超過 24 小時。'));
-            if(shift)for(const e of this.data.events)if(e!==action.start&&e!==action.end&&e.t>=oldEnd)e.t+=delta;
-            if(shift)for(const [e,end] of this.implicitEnds)if(e!==action.start&&end>=oldEnd)this.implicitEnds.set(e,Math.max(e.t,end+delta));
+            if(shift)this.shiftActions(oldEnd,delta,action.start);
             this.ensureEnd(action,action.start.t+value).t=action.start.t+value;
             if(implicit)this.tail=Math.max(0,(shift?oldTotal+delta:oldTotal)-this.last());this.sync();
         }
@@ -875,8 +904,7 @@
             if(!Number.isFinite(time)||time<0||(held?oldEnd+delta:time)>86400000||(shift&&this.last()+this.tail+delta>86400000))throw Error(translateUI('結束不得超過 24 小時。'));
             if(!shift&&action.next&&oldEnd+delta>action.next.t)throw Error(translateUI('此按鍵後面已有其他動作，請縮短時間或開啟連同後續一起移動。'));
             if(held&&!action.end){this.ensureEnd(action,oldEnd);if(implicit)this.tail=Math.max(0,this.data.duration-this.last());}
-            if(shift)for(const e of this.data.events)if(e!==action.start&&e!==action.end&&e.t>=old)e.t+=delta;
-            if(shift)for(const [e,end] of this.implicitEnds)if(e!==action.start&&end>=old)this.implicitEnds.set(e,Math.max(e.t,end+delta));
+            if(shift)this.shiftActions(old,delta,action.start);
             action.start.t=time;if(action.end)action.end.t+=delta;else if(this.implicitEnds.has(action.start))this.implicitEnds.set(action.start,Math.max(time,this.implicitEnds.get(action.start)));this.sync();
         }
         finalize() {for(const [start,time] of [...this.implicitEnds])if(this.data.events.includes(start))this.ensureEnd({start,end:null},time);this.sync();return this.data;}
@@ -1612,7 +1640,7 @@
             .macro-window{position:fixed;z-index:20;pointer-events:auto;width:min(600px,calc(100vw - 16px));max-height:calc(100dvh - 16px);background:#111c29f5;color:#e2edf5;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 40px #0008;overflow:auto;padding:10px;box-sizing:border-box;font:12px/1.4 system-ui}
             .float-header{display:flex;align-items:center;gap:6px;position:sticky;top:-10px;background:#111c29;z-index:3;padding:6px 0}.float-grip{cursor:move;touch-action:none;user-select:none;padding:5px 12px;color:#9dc9e8}.float-header .float-grip{flex:1}.macro-window .setting input{max-width:65%}.macro-window .slots{display:flex;gap:3px}.macro-window .slots button{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis}.macro-window .v15-card{padding:7px}.macro-window button{touch-action:manipulation}.macro-window .edit-step{border:1px solid var(--line);border-radius:8px;padding:8px;margin:7px 0}.macro-window .edit-step .row{flex-wrap:wrap;gap:4px}.edit-value{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:6px 0}.edit-value input[type=range]{width:145px;padding:0}.edit-time{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:5px 0}.edit-time input{width:85px}.field-error{color:#ff9a9a;font-size:11px}.edit-invalid{outline:2px solid #ff6868!important}.editor-alert{position:sticky;top:34px;z-index:2;background:#4a1823;color:#ffdbe1;padding:8px;border:1px solid #ff6868;border-radius:6px}.editor-alert:empty{display:none}.editor-alert[data-success=true]{background:#193c2d;border-color:#74efb4;color:#baffdc}.editor-summary{display:block;font-weight:bold;margin:6px 0}.quickbar{max-height:calc(100dvh - 16px);box-sizing:border-box}.quickbar .float-grip{text-align:center;padding:2px}.quickbar .on{border-color:#65e9af}
 
-            .macro-timeline{scroll-margin-top:50px;margin:10px 0;padding:8px;background:#09131e;border:1px solid var(--line);border-radius:8px}.timeline-scroll{overflow:auto;max-height:310px;padding:8px 0;overscroll-behavior:contain}.timeline-ruler{position:relative;height:22px;color:#93a4b6;font:10px system-ui}.timeline-ruler>span{position:absolute;transform:translateX(-50%);white-space:nowrap}.timeline-lane{display:flex;align-items:center;height:46px;border-bottom:1px solid #ffffff15}.timeline-label{position:sticky;left:0;z-index:2;flex:none;width:66px;background:#09131e;color:#c2d7e8;font-size:11px}.timeline-track{position:relative;height:40px;flex:none;background:repeating-linear-gradient(90deg,#ffffff0a 0,#ffffff0a 1px,transparent 1px,transparent 20%)}.timeline-bar{position:absolute;top:5px;height:30px;display:flex;align-items:center;border:1px solid #71baff;border-radius:5px;background:#24466b;cursor:grab;color:#ecf6ff;box-sizing:border-box;overflow:visible;font:10px system-ui;user-select:none}.timeline-bar>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 5px;pointer-events:none}.timeline-bar.selected{outline:2px solid #74efb4;background:#235341}.timeline-bar.point{background:#63512c;border-color:#f0c56e}.timeline-resize{position:absolute;right:0;top:0;height:100%;width:18px;display:grid;place-items:center;background:#ffffff18;cursor:ew-resize;border-left:1px solid #ffffff40}.percent-input{width:64px!important;text-align:center}.edit-value input[type=range]{width:100%;margin:5px 0}.macro-window .edit-step{border-color:#74efb477}
+            .macro-timeline{scroll-margin-top:50px;margin:10px 0;padding:8px;background:#09131e;border:1px solid var(--line);border-radius:8px}.timeline-scroll{overflow:auto;max-height:310px;padding:8px 0;overscroll-behavior:contain}.timeline-ruler{position:relative;height:22px;color:#93a4b6;font:10px system-ui}.timeline-ruler>span{position:absolute;transform:translateX(-50%);white-space:nowrap}.timeline-lane{display:flex;align-items:center;height:46px;border-bottom:1px solid #ffffff15}.timeline-label{position:sticky;left:0;z-index:2;flex:none;width:66px;background:#09131e;color:#c2d7e8;font-size:11px}.timeline-track{position:relative;height:40px;flex:none;background:repeating-linear-gradient(90deg,#ffffff0a 0,#ffffff0a 1px,transparent 1px,transparent 20%)}.timeline-bar{position:absolute;top:5px;height:30px;display:flex;align-items:center;border:1px solid #71baff;border-radius:5px;background:#24466b;cursor:grab;color:#ecf6ff;box-sizing:border-box;overflow:visible;font:10px system-ui;user-select:none}.timeline-bar>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 5px;pointer-events:none}.timeline-bar.selected{outline:2px solid #74efb4;background:#235341}.timeline-bar.point{background:#63512c;border-color:#f0c56e}.timeline-resize{position:absolute;right:0;top:0;height:100%;width:18px;display:grid;place-items:center;background:#ffffff18;cursor:ew-resize;border-left:1px solid #ffffff40}.timeline-wait{position:absolute;top:7px;height:26px;border:1px dashed #d5b569;color:#ffe4a4;background:repeating-linear-gradient(135deg,#76602a33 0,#76602a33 5px,#76602a66 5px,#76602a66 10px);font:10px/24px system-ui;text-align:center;overflow:hidden;white-space:nowrap}.percent-input{width:64px!important;text-align:center}.edit-value input[type=range]{width:100%;margin:5px 0}.macro-window .edit-step{border-color:#74efb477}
             @media(max-width:390px){.macro-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.macro-window{padding:7px}.macro-window .float-header{top:-7px}}
             `;this.app.shadow.append(css);
             this.macroWindow=el('section','macro-window');this.macroWindow.hidden=true;this.macroWindow.setAttribute('role','region');setLabel(this.macroWindow,'aria-label',()=>translateUI('巨集工作室'));
@@ -1708,6 +1736,9 @@
                     });track.append(bar);
                 }canvas.append(lane);
             }
+            const intervals=rows.filter(a=>a.held).map(a=>[a.start.t,this.model.endTime(a)]).sort((a,b)=>a[0]-b[0]),gaps=[];let cursor=0;
+            for(const [start,end] of intervals){if(start>cursor)gaps.push([cursor,start]);cursor=Math.max(cursor,end);}if(this.draft.duration>cursor)gaps.push([cursor,this.draft.duration]);
+            if(gaps.length){const lane=el('div','timeline-lane'),track=el('div','timeline-track');track.style.width=`${width}px`;lane.append(el('span','timeline-label',()=>translateUI('等待')),track);for(const [start,end] of gaps){const gap=el('div','timeline-wait',`${((end-start)/1000).toFixed(1)} s`);gap.style.left=`${start*scale}px`;gap.style.width=`${Math.max(2,(end-start)*scale)}px`;setLabel(gap,'title',()=>`${translateUI('空白等待')} ${(start/1000).toFixed(1)}–${(end/1000).toFixed(1)} s`);track.append(gap);}canvas.append(lane);}
             if(!rows.length)canvas.append(el('div','meta',()=>translateUI('新增動作以建立時間軸。')));
             viewport.append(canvas);panel.append(viewport);parent.append(panel);viewport.scrollLeft=this.timelineScroll||0;viewport.onscroll=()=>this.timelineScroll=viewport.scrollLeft;
             this.updateTimelineLabels=()=>{for(const {node,action,name} of this.timelineLabels||[]){const e=action.start,end=action.held?this.model.endTime(action):e.t,value=e.type==='axis'||e.id===6||e.id===7?`${Math.round(e.val*100)}%`:translateUI(e.val?'按住':'放開');setText(node,()=>`${name} ${value}`);setLabel(node.parentElement,'aria-label',()=>`${name} ${(e.t/1000).toFixed(1)}–${(end/1000).toFixed(1)} s · ${value}`);setLabel(node.parentElement,'title',()=>`${name} ${(e.t/1000).toFixed(1)}–${(end/1000).toFixed(1)} s · ${value}`);}};this.updateTimelineLabels();
@@ -1727,7 +1758,12 @@
                 const action=rows[r],e=action.start;if(this.editMode==='simple'&&e!==this.selectedEvent)continue;const card=el('section','edit-step');card.dataset.event=String(this.draft.events.indexOf(e));
                 card.append(el('strong','',()=>`${r+1}. ${e.type==='btn'?LABELS[e.id]:['LS X','LS Y','RS X','RS Y'][e.id]}`));
                 this.editorNumber(card,'開始時間',e,'time',e.t/1000,0,Math.max(0,(86400000-(action.held?this.model.endTime(action)-e.t:0))/1000),v=>this.model.move(action,v*1000,this.editMode==='simple'&&this.shiftFollowing),()=>e.t/1000);
-                if(this.editMode==='simple'){const prior=r?rows[r-1]:null,priorEnd=prior?(prior.end||prior.start).t:0;if(e.t>=priorEnd)this.editorNumber(card,'前段等待',e,'gap',(e.t-priorEnd)/1000,0,Math.max(0,(86400000-priorEnd)/1000),v=>this.model.move(action,priorEnd+v*1000,this.shiftFollowing),()=>Math.max(0,(e.t-(prior?(prior.end||prior.start).t:0))/1000));}
+                if(this.editMode==='simple'){
+                    const anchor=this.model.waitAnchor(action);if(e.t>=anchor)this.editorNumber(card,'前段等待',e,'gap',(e.t-anchor)/1000,0,Math.max(0,(86400000-anchor)/1000),v=>this.model.waitBefore(action,v*1000,this.shiftFollowing),()=>Math.max(0,(e.t-this.model.waitAnchor(action))/1000));
+                    const waits=el('div','row');waits.append(el('span','meta',()=>translateUI('插入空白等待')));
+                    for(const ms of [100,500,1000])waits.append(button(`+${(ms/1000).toFixed(1)} s`,()=>{if(this.editErrors.size){setText(this.editorMessage,()=>translateUI('請先修正標紅欄位。'));return;}try{this.model.insertWait(e.t,ms);this.editPage=Math.floor(this.editorRows().findIndex(a=>a.start===e)/pageSize);this.renderEditor();}catch(error){setText(this.editorMessage,()=>translateUI(error.message));}}));
+                    card.append(waits,el('div','hint',()=>translateUI('在此動作前留白；跨越等待的長按會先放開，等待後再繼續。')));
+                }
                 if(action.held){
                     this.editorNumber(card,'按住時間',e,'hold',(this.model.endTime(action)-e.t)/1000,.001,Math.max(.001,(86400000-e.t)/1000),v=>this.model.duration(action,v*1000,this.shiftFollowing),()=>(this.model.endTime(action)-e.t)/1000);
                     const presets=el('div','row');for(const [ms,label] of [[80,'短按'],[100,'0.1 s'],[500,'0.5 s'],[1000,'1.0 s']])presets.append(button(()=>translateUI(label),()=>{const key=`${d.events.indexOf(e)}:hold`;this.editErrors.delete(key);this.model.duration(action,ms,this.shiftFollowing);if(!this.editErrors.size)setText(this.editorMessage,()=>'');this.renderEditor();}));card.append(presets);
