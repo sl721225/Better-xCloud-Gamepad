@@ -3,7 +3,7 @@
 // @homepageURL https://github.com/sl721225/CloudPad-Studio
 // @supportURL  https://github.com/sl721225/CloudPad-Studio/issues
 // @namespace    http://tampermonkey.net/
-// @version      15.4.4
+// @version      15.5.0
 // @updateURL    https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js
 // @downloadURL  https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js
 // @description  獨立輸入來源、類比巨集、六組佈局、賽車與極簡 HUD。安裝前請停用舊版。
@@ -15,18 +15,18 @@
 // ==/UserScript==
 
 /*
- * v15.4.4 — 失焦後殘留手動事件防護與可見停止原因；保留 Dev 自動更新。
+ * v15.5.0 — 浮動巨集工作室、觸控時間編輯、可拖曳循環快捷列。
  * 沿用既有 namespace 與儲存 key，讓既有安裝與設定可以升級。
  * 設定：better_xcloud_gamepad_v14；首次讀入 v13/v12，舊資料不覆寫。
  * F2 / L3+R3 1.5秒：有鎖定/連發則解除，否則收合/展開。
- * 紅色「全停」：停止巨集、AFK、連發、鎖定與手動輸入。
+ * 紅色「全停」：停止巨集、連發、鎖定與手動輸入。
  * 安全性：切模式、進入佈局編輯、失焦或切到背景時釋放輸入並停止自動操作。
- * 類比軸仲裁：手動 > 巨集 > AFK；按鍵取各來源最大值。
+ * 類比軸仲裁：手動 > 巨集；按鍵取各來源最大值。
  * 實體手把只讀取監控，不複製進虛擬手把，避免雙重輸入。
  */
 (function () {
     'use strict';
-    const VERSION = '15.4.4';
+    const VERSION = '15.5.0';
     const APP_NAME = 'CloudPad Studio (Dev)';
     const UPDATE_CHANNEL='dev';
     const DEV_SCRIPT_URL='https://raw.githubusercontent.com/sl721225/CloudPad-Studio/v15-development/CloudPad-Studio.user.js';
@@ -67,7 +67,7 @@
     "背景繼續播放巨集": "Keep macros playing in background",
     "關閉（離開視窗即停止）": "Off (stop when leaving the window)",
     "開啟（保留巨集播放）": "On (keep macro playback)",
-    "僅保留已啟動的巨集播放；錄製、手動輸入、連發、鎖定與 AFK 仍停止。背景計時可能被瀏覽器降頻；最小化、休眠或串流暫停時無法保證遊戲收到輸入。": "Keeps only existing macro playback. Recording, manual input, rapid fire, hold and AFK stop. Browsers may throttle background timers; input delivery is not guaranteed when minimized, suspended or the stream pauses.",
+    "僅保留已啟動的巨集播放；錄製、手動輸入、連發與鎖定 仍停止。背景計時可能被瀏覽器降頻；最小化、休眠或串流暫停時無法保證遊戲收到輸入。": "Keeps only existing macro playback. Recording, manual input, rapid fire and hold stop. Browsers may throttle background timers; input delivery is not guaranteed when minimized, suspended or the stream pauses.",
     "長按保護只限制手動觸控按鍵／油門，不限制刻意鎖定或連發。失焦或隱藏分頁時依「背景繼續播放巨集」設定處理；離線或離開頁面時全停。全螢幕切換會取消觸控操作。": "Hold protection applies only to manual touch buttons / throttle, not deliberate hold or rapid fire. Focus loss and hidden tabs follow the background macro setting. Going offline or leaving the page stops all input. Fullscreen changes cancel touch input.",
     "無法讀取設定，使用暫存設定。": "Cannot read settings; using temporary settings.",
     "設定來自較新版本，停止覆寫。": "Settings are from a newer version; saving is disabled.",
@@ -131,8 +131,6 @@
     "雙擊連發／三擊鎖定": "Double-tap rapid fire / triple-tap hold",
     "關閉（防誤觸）": "Off (safe taps)",
     "開啟": "On",
-    "AFK 擺頭幅度": "AFK stick movement",
-    "啟動 AFK 擺頭": "Start AFK movement",
     "控制面板大小": "Panel size",
     "控制面板背景": "Panel background",
     "半透明": "Translucent",
@@ -206,7 +204,6 @@
     " · 槽位 ": " · Slot ",
     " 筆 / ": " events / ",
     "巨集 ": "Macro ",
-    "停止 AFK 擺頭": "Stop AFK movement",
     "實體手把（來源已固定）": "Physical gamepad (source locked)",
     "已連接：": "Connected: ",
     "未連接實體手把 · 請連接並按一下手把按鍵": "No physical gamepad · connect one and press a button",
@@ -410,6 +407,8 @@
     "[CloudPad Studio] 啟動失敗": "[CloudPad Studio] Startup failed",
     "CloudPad Studio 啟動失敗，請查看 Console 並確認舊版已停用。": "CloudPad Studio could not start. Check the Console and disable older versions."
 };
+    Object.assign(EN,{"來源": "Source", "巨集工作室": "Macro Studio", "⠿ 巨集工作室": "⠿ Macro Studio", "拖曳快捷列": "Drag quickbar", "新增／管理巨集": "Add / manage macros", "↻ 循環": "↻ Loop", "▶ 單次": "▶ Once", "重設巨集視窗與快捷列位置": "Reset macro window and quickbar positions", "重設位置": "Reset position", "編輯此巨集": "Edit this macro", "總時長": "Total duration", "槽位": "Slot", "筆": "events", "秒": "s", "結尾等待": "Tail wait", "簡易": "Simple", "精細": "Precise", "連同後續一起移動": "Move following actions together", "修改按住時間時，後續動作跟著移動。": "Changing the hold duration also moves subsequent actions.", "只改此動作：其他時間保持不變，可同時按鍵。": "Only this action: keep other times to allow overlapping inputs.", "開始時間": "Start time", "按住時間": "Hold duration", "前段等待": "Wait before action", "有效範圍": "Valid range", "按住": "Hold", "放開": "Release", "方向": "Direction", "上": "Up", "下": "Down", "左": "Left", "右": "Right", "搖桿幅度": "Stick strength", "按壓深度": "Trigger depth", "回中": "Center", "全推": "Full", "全按": "Full", "短按": "Tap", "動作類型": "Action type", "請先修正標紅欄位。": "Please correct the highlighted fields first.", "尚未儲存：請修正第": "Not saved: correct action", "筆標紅欄位。": "highlighted fields.", "以草稿取代槽位": "Replace slot with draft", "編輯只修改暫存草稿，儲存後才取代原巨集。關閉視窗會保留草稿，錄製與播放仍繼續。簡易模式修改按住時間時，預設連同後續動作一起移動；只改此動作可保留同時按鍵。": "Edits stay in a temporary draft until saved. Closing this window keeps the draft and does not stop recording or playback. Simple mode moves later actions when changing hold duration; turn this off to preserve overlapping inputs."});
+    EN['短按（原始時間保留）']='Short press (original timing preserved)';
     const EN_KEYS = new Map(Object.entries(EN).map(([zh,en])=>[en,zh]));
     let uiLanguage='zh-TW',activeI18n=null;
     const translateUI = text => {if(typeof text==='function')return translateUI(text());if(typeof text!=='string')return text;const key=EN_KEYS.get(text)||text;return uiLanguage==='en'?(EN[key]??key):key;};
@@ -441,9 +440,9 @@
     const GROUPS = {'0':'face','1':'face','2':'face','3':'face','12':'dpad','13':'dpad','14':'dpad','15':'dpad',
         '8':'center','9':'center','4':'leftTop','6':'leftTop','5':'rightTop','7':'rightTop',
         stick_0:'leftStick','10':'leftStick',stick_2:'rightStick','11':'rightStick'};
-    const DEFAULTS = () => ({backgroundMacro:false,language:'zh-TW',delay:3000, bgTrans:false, afkAmp:0.2, gameMode:'standard', comboTaps:false, racingAutoFade:true, showHelp:true,
+    const DEFAULTS = () => ({backgroundMacro:false,language:'zh-TW',delay:3000, bgTrans:false,  gameMode:'standard', comboTaps:false, racingAutoFade:true, showHelp:true,
         splitMode:false, uiScale:1, showViewer:false, viewerScale:0.8, viewerPos:{x:'20px',y:'20px'},
-        panelPos:null, layoutSlot:1, layouts:slots(() => ({})), macros:slots(() => ({name:'',duration:0,events:[]})),
+        macroWindowPos:null,quickbarPos:null,quickbarLoop:false,macroEditModes:slots(()=>'simple'),panelPos:null, layoutSlot:1, layouts:slots(() => ({})), macros:slots(() => ({name:'',duration:0,events:[]})),
         layoutNames:slots(()=>''),axisTuning:[0,1].map(()=>({deadzone:0,sensitivity:1,max:1,curve:'linear',invertX:false,invertY:false})),
         buttonMap:Array.from({length:17},(_,i)=>i),physicalMapping:false,macroSpeed:1,macroRecordSource:'virtual',
         keyboardMacros:false,comboMacros:false,showQuickbar:true,quickbarCollapsed:true,
@@ -460,7 +459,7 @@
         sanitize(data) {
             const p = DEFAULTS(); const d = data && typeof data === 'object' ? data : {};
             if(['zh-TW','en'].includes(d.language))p.language=d.language;
-            ['backgroundMacro','touchAutoFade','bgTrans','comboTaps','splitMode','showViewer','racingAutoFade','showHelp','physicalMapping','keyboardMacros','comboMacros','showQuickbar','quickbarCollapsed','emergencyEnabled'].forEach(k => {if (typeof d[k] === 'boolean') p[k]=d[k];});
+            ['quickbarLoop','backgroundMacro','touchAutoFade','bgTrans','comboTaps','splitMode','showViewer','racingAutoFade','showHelp','physicalMapping','keyboardMacros','comboMacros','showQuickbar','quickbarCollapsed','emergencyEnabled'].forEach(k => {if (typeof d[k] === 'boolean') p[k]=d[k];});
             p.macroSpeed=d.macroSpeed==null?1:clamp(d.macroSpeed,.25,3);
             if(['virtual','physical'].includes(d.macroRecordSource))p.macroRecordSource=d.macroRecordSource;
             if(['panel','touch'].includes(d.controlStyle))p.controlStyle=d.controlStyle;
@@ -482,7 +481,6 @@
                     curve:['linear','soft','fast'].includes(t.curve)?t.curve:'linear',invertX:t.invertX===true,invertY:t.invertY===true};
             }
             p.delay = d.delay == null ? p.delay : clamp(d.delay,100,10000);
-            p.afkAmp = d.afkAmp == null ? p.afkAmp : clamp(d.afkAmp,0.1,0.5);
             p.gameMode = d.gameMode === 'racing' ? 'racing' : 'standard';
             p.uiScale = [0.8,1,1.2,1.5].includes(Number(d.uiScale)) ? Number(d.uiScale) : 1;
             p.viewerScale = [0.6,0.8,1,1.2].includes(Number(d.viewerScale)) ? Number(d.viewerScale) : 0.8;
@@ -490,7 +488,8 @@
             const point = v => v && Number.isFinite(parseFloat(v.x)) && Number.isFinite(parseFloat(v.y))
                 ? {x:`${clamp(parseFloat(v.x),-20000,20000)}px`,y:`${clamp(parseFloat(v.y),-20000,20000)}px`} : null;
             p.viewerPos = point(d.viewerPos) || p.viewerPos; p.panelPos = point(d.panelPos);
-            p.touchPanelPos=point(d.touchPanelPos)||p.touchPanelPos;
+            p.touchPanelPos=point(d.touchPanelPos)||p.touchPanelPos;p.macroWindowPos=point(d.macroWindowPos);p.quickbarPos=point(d.quickbarPos);
+            for(let slot=1;slot<=6;slot++)p.macroEditModes[slot]=d.macroEditModes?.[slot]==='fine'?'fine':'simple';
             for (let s=1;s<=6;s++) {
                 if(typeof d.layoutNames?.[s]==='string')p.layoutNames[s]=d.layoutNames[s].trim().slice(0,60);
                 const layout = d.layouts?.[s];
@@ -560,7 +559,7 @@
             }
             return out;
         }
-        recordingState() {return this.snapshot(key=>key!=='macro'&&key!=='afk');}
+        recordingState() {return this.snapshot(key=>key!=='macro');}
     }
 
     class VirtualGamepad {
@@ -668,6 +667,7 @@
             this.capture(true); this.recording=false;
             if(this.started!==null) {
                 const duration=Math.max(1,this.clock()-this.started);
+                this.config.prefs.macroEditModes[this.slot]=this.recordSource==='physical'?'fine':'simple';
                 this.config.prefs.macros[this.slot]={name:this.config.prefs.macros[this.slot].name||'',duration,events:clone(this.events)}; this.config.save();
             }
         }
@@ -793,7 +793,7 @@
             const d=clone(doc.settings),defaults=DEFAULTS();
             // v15.0.0～15.0.2 完整備份沒有來源設定，仍可還原為虛擬錄製。
             if(!('macroRecordSource' in d))d.macroRecordSource='virtual';
-            for(const key of ['backgroundMacro','language','touchAutoFade','racingLayouts','controlStyle','touchPanelPos','touchLayouts','touchButtonSize','touchStickSize','touchHitPadding','touchOpacityLeft','touchOpacityRight','touchOpacityUtility'])if(!(key in d))d[key]=clone(defaults[key]);
+            for(const key of ['macroWindowPos','quickbarPos','quickbarLoop','macroEditModes','backgroundMacro','language','touchAutoFade','racingLayouts','controlStyle','touchPanelPos','touchLayouts','touchButtonSize','touchStickSize','touchHitPadding','touchOpacityLeft','touchOpacityRight','touchOpacityUtility'])if(!(key in d))d[key]=clone(defaults[key]);
             for(const key of Object.keys(defaults))if(!(key in d))throw Error((translateUI("備份缺少 ")+String(key)+"。"));
             MacroBackup.validate({format:'better-xcloud-macros',version:1,macros:[1,2,3,4,5,6].map(slot=>({slot,...d.macros?.[slot]}))});
             for(let s=1;s<=6;s++){
@@ -835,6 +835,32 @@
         }
     }
 
+    class MacroDraft {
+        constructor(macro) {this.data=clone(macro);this.tail=Math.max(0,macro.duration-this.last());}
+        last() {return this.data.events.reduce((n,e)=>Math.max(n,e.t),0);}
+        sync() {this.data.duration=this.last()+this.tail;}
+        actions() {
+            const rows=[],pending=new Map(),used=new Set(),events=this.data.events;
+            events.forEach((e,i)=>{if(e.type==='btn'&&e.id!==6&&e.id!==7&&(e.val===0||e.val===1)){
+                if(e.val===1){pending.set(e.id,{e,i});}else if(pending.has(e.id)){const start=pending.get(e.id);rows.push({start:start.e,end:e,index:start.i});used.add(start.e);used.add(e);pending.delete(e.id);}
+            }});
+            events.forEach((e,i)=>{if(!used.has(e))rows.push({start:e,end:null,index:i});});
+            return rows.sort((a,b)=>a.start.t-b.start.t||a.index-b.index);
+        }
+        duration(action,value,shift=true) {
+            const oldEnd=action.end.t,delta=value-(oldEnd-action.start.t);
+            if(!Number.isFinite(value)||value<=0)throw Error('Hold time must be positive');
+            if(shift)for(const e of this.data.events)if(e!==action.end&&e!==action.start&&e.t>=oldEnd)e.t+=delta;
+            action.end.t=action.start.t+value;this.sync();
+        }
+        move(action,time,shift=true) {
+            const old=action.start.t,delta=time-old;
+            if(shift)for(const e of this.data.events)if(e!==action.start&&e!==action.end&&e.t>=old)e.t+=delta;
+            action.start.t=time;if(action.end)action.end.t+=delta;this.sync();
+        }
+        remove(action) {this.data.events=this.data.events.filter(e=>e!==action.start&&e!==action.end);this.sync();}
+    }
+
     class ShortcutManager {
         constructor(app) {
             this.app=app;this.comboHeld=new Set();this.keyHeld=new Set();this.blocked=new Set();this.holdSince=new Map();
@@ -862,7 +888,7 @@
             }
             for(const key of this.holdSince.keys())if(!present.has(key))this.holdSince.delete(key);
             if(!p.comboMacros){this.comboHeld.clear();return;}
-            const raw=a.rawSnapshot(key=>key!=='macro'&&key!=='afk'&&!key.startsWith('auto:'));
+            const raw=a.rawSnapshot(key=>key!=='macro'&&!key.startsWith('auto:'));
             raw.buttons=raw.buttons.map((v,i)=>Math.max(v,a.physical.state.buttons[i]));
             // 先鎖存整組，播放造成的輸入清除不會在同一幀重複觸發。
             const active=p.macroCombos.map(c=>c.every(id=>raw.buttons[id]>.5));let trigger=0;
@@ -920,7 +946,7 @@
     }
 
     class RacingController {
-        constructor(app) {this.app=app;this.afk=false;this.left=null;this.right=null;}
+        constructor(app) {this.app=app;this.left=null;this.right=null;}
         start(side,e) {
             if(this[side])return null;if(this.app.manualStart()===false)return null;
             const key=`race:${e.pointerId}`;const s={x:e.clientX,y:e.clientY,dx:0,dy:0,ratio:0,pressed:false,flick:false};this[side]=s;
@@ -939,12 +965,7 @@
                 }
             },end:()=>{this[side]=null;this.app.input.clear(key);}};
         }
-        tick(now) {
-            if(!this.afk){this.app.input.clear('afk');return;}
-            const axis=(Math.sin(now/800)+Math.sin(now/1700)*0.4+(Math.random()-0.5)*0.04)*this.app.config.prefs.afkAmp;
-            this.app.input.set('afk','axis',0,axis,10);
-        }
-        stop() {this.afk=false;this.app.input.clear('afk');}
+        stop() {this.left=null;this.right=null;}
     }
 
     // DOM / CSS 與核心引擎分離。Shadow DOM 隔離 Xbox 網頁樣式。
@@ -1167,12 +1188,10 @@
             this.backgroundSelect.onchange=()=>{const previous=this.p.backgroundMacro;this.p.backgroundMacro=this.backgroundSelect.value==='true';
                 if(!this.config.save()){this.p.backgroundMacro=previous;this.backgroundSelect.value=String(previous);return;}
                 if(this.app.backgrounded&&!this.p.backgroundMacro)this.app.suspend('disabled');};
-            page.append(el('div','hint',()=>translateUI('僅保留已啟動的巨集播放；錄製、手動輸入、連發、鎖定與 AFK 仍停止。背景計時可能被瀏覽器降頻；最小化、休眠或串流暫停時無法保證遊戲收到輸入。')));
+            page.append(el('div','hint',()=>translateUI('僅保留已啟動的巨集播放；錄製、手動輸入、連發與鎖定 仍停止。背景計時可能被瀏覽器降頻；最小化、休眠或串流暫停時無法保證遊戲收到輸入。')));
             page.append(el('div','hint',()=>translateUI('背景播放會攔截頁面的視窗失焦通知，避免串流端立即停用控制器；頁內輸入框切換不受影響。')));
             this.selectSetting(page,()=>translateUI('連發間隔'),'delay',[100,200,500,1000,2000,3000,5000,10000].map(v=>[v,()=>(String(v/1000)+translateUI(" 秒"))]),()=>this.app.auto.restart());
             this.selectSetting(page,()=>translateUI('雙擊連發／三擊鎖定'),'comboTaps',[[false,()=>translateUI('關閉（防誤觸）')],[true,()=>translateUI('開啟')]]);
-            this.selectSetting(page,()=>translateUI('AFK 擺頭幅度'),'afkAmp',[.1,.15,.2,.25,.3,.4,.5].map(v=>[v,`${Math.round(v*100)}%`]));
-            this.afkBtn=button(()=>translateUI('啟動 AFK 擺頭'),()=>{if(this.app.manualStart()===false)return null;this.app.racing.afk=!this.app.racing.afk;this.app.racing.tick(this.app.clock());this.refresh();});page.append(this.afkBtn);
             this.selectSetting(page,()=>translateUI('控制面板大小'),'uiScale',[.8,1,1.2,1.5].map(v=>[v,`${Math.round(v*100)}%`]));
             this.selectSetting(page,()=>translateUI('控制面板背景'),'bgTrans',[[false,()=>translateUI('半透明')],[true,()=>translateUI('透明')]]);
             this.selectSetting(page,()=>translateUI('觸控操作時面板淡化'),'touchAutoFade',[[true,()=>translateUI('開啟（25%）')],[false,()=>translateUI('關閉')]]);
@@ -1190,14 +1209,14 @@
             const page=el('div');const slotsRow=el('div','slots');this.macroSlots=[];
             for(let s=1;s<=6;s++){const b=button(()=>String(s),()=>{this.app.macro.select(s);this.refresh();});this.macroSlots.push(b);slotsRow.append(b);}
             const style=el('style');style.textContent=`
-                .macro-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0}
-                .macro-action{display:flex;align-items:center;justify-content:center;gap:9px;min-height:46px;font-size:13px;padding:8px}
+                .macro-actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin:6px 0}
+                .macro-action{display:flex;align-items:center;justify-content:center;gap:5px;min-height:36px;font-size:12px;padding:5px}
                 .macro-action svg{width:24px;height:24px;flex:none;pointer-events:none}
                 .macro-action.record svg{color:#ff6868}.macro-action.play svg{color:#57e5a1}.macro-action.loop svg{color:#71baff}.macro-action.stop svg{color:#f4c571}
-                .record-source{display:flex;gap:7px;flex-wrap:wrap;margin:6px 0}.record-source button{min-height:38px;flex:1;font-size:12px}
+                .record-source{display:flex;gap:7px;flex-wrap:wrap;margin:6px 0}.record-source button{min-height:30px;flex:1;font-size:12px}
                 .record-source-state{overflow-wrap:anywhere;margin-bottom:8px}
             `;page.append(style);
-            const sourceRow=el('div','record-source');sourceRow.setAttribute('role','group');setLabel(sourceRow,"aria-label",()=>translateUI('錄製來源'));this.recordSourceButtons={};
+            const sourceRow=el('div','record-source');sourceRow.append(el('span','meta',()=>translateUI('來源')));sourceRow.setAttribute('role','group');setLabel(sourceRow,"aria-label",()=>translateUI('錄製來源'));this.recordSourceButtons={};
             for(const [source,label] of [['virtual',()=>translateUI('虛擬操作')],['physical',()=>translateUI('實體手把')]]){
                 const b=button(()=>translateUI(label),()=>{if(this.app.macro.recording)return;const old=this.p.macroRecordSource;this.p.macroRecordSource=source;
                     if(!this.config.save()){this.p.macroRecordSource=old;this.app.notice(translateUI('錄製來源儲存失敗，已恢復原設定。'));}this.refreshStatus();});
@@ -1218,11 +1237,11 @@
             row.append(this.recordButton,this.playButton,this.loopButton,this.stopButton);
             const clearRow=el('div','row');clearRow.append(button(()=>translateUI('清除'),()=>{if(ask(translateUI('清除此巨集槽位？'))){this.app.macro.clear();this.refresh();}},'danger'));
             const nameRow=el('label','setting');nameRow.append(el('span','',()=>translateUI('巨集名稱')));this.macroName=el('input');this.macroName.type='text';this.macroName.maxLength=60;
-            this.macroName.onchange=()=>{if(this.macroBusy())return;const macro=this.p.macros[this.app.macro.slot],old=macro.name;macro.name=this.macroName.value.trim();if(!this.config.save()){macro.name=old;setText(this.backupMessage,()=>translateUI('名稱儲存失敗。'));}this.refreshStatus();};nameRow.append(this.macroName);
+            this.macroName.onchange=()=>{if(this.macroBusy())return;if(this.app.advanced?.draft&&this.app.advanced.editSlot===this.app.macro.slot){this.app.advanced.draft.name=this.macroName.value.trim();return;}const macro=this.p.macros[this.app.macro.slot],old=macro.name;macro.name=this.macroName.value.trim();if(!this.config.save()){macro.name=old;setText(this.backupMessage,()=>translateUI('名稱儲存失敗。'));}this.refreshStatus();};nameRow.append(this.macroName);
             this.macroStatus=el('div','meta');this.macroStopReason=el('div','meta');
             this.macroDebug=el('details');this.macroDebug.append(el('summary','meta',()=>translateUI('背景播放診斷')));
             this.macroDebugText=el('pre','backup-message');this.macroDebug.append(this.macroDebugText);
-            page.append(slotsRow,nameRow,el('div','meta',()=>translateUI('錄製來源')),sourceRow,this.recordSourceState,row,clearRow,this.macroStatus,this.macroStopReason,this.macroDebug,
+            page.append(slotsRow,nameRow,sourceRow,this.recordSourceState,row,clearRow,this.macroStatus,this.macroStopReason,this.macroDebug,
                 el('div','hint',()=>translateUI('第一次操作才開始計時；按下停止前的等待也會保存。實體錄製只讀取開始時選定的手把，保留按鍵、搖桿與 LT／RT 深度；播放時套用目前映射與曲線。')),this.backupPage());
             return page;
         }
@@ -1299,7 +1318,7 @@
             page.append(slotRow,row,el('div','hint',()=>translateUI('編輯時拖曳按鍵／搖桿；拖曳只改位置，不送出遊戲輸入。舊版儲存的位移會沿用於新介面的對應控制元件。')));
             return page;
         }
-        openTab(tab) {if(this.app.layout.editing&&tab!=='layout'){this.app.pointers.cancelAll();this.app.layout.editing=false;}
+        openTab(tab) {if(tab==='macro'&&this.app.advanced?.macroWindow){this.app.advanced.toggleMacroWindow();return;}if(this.app.layout.editing&&tab!=='layout'){this.app.pointers.cancelAll();this.app.layout.editing=false;}
             this.tab=tab;if(tab)this.collapsed=false;this.refresh();
             if(tab==='diagnostics'){this.app.override=false;this.app.updateVisibility();}}
         setMode(id,mode) {if(this.app.manualStart()===false)return null;this.app.auto.set(id,mode);this.refresh();}
@@ -1375,20 +1394,18 @@
                 playing:m.playing,loop:m.loop,backgrounded:!!this.app.backgrounded,hasFocus:document.hasFocus(),hidden:document.hidden,
                 ignoredLateInput:this.app.ignoredBackgroundInput||0,focusGuards:this.app.focusGuardCount||0,timerActive:this.app.backgroundTimer!=null,
                 lastStop:m.lastStop||null},null,2));
-            const sig=JSON.stringify([...this.app.auto.modes].map(([id,v])=>[id,v.mode]))+this.app.racing.afk+m.playing+m.recording+m.slot+this.app.backgrounded;
+            const sig=JSON.stringify([...this.app.auto.modes].map(([id,v])=>[id,v.mode]))+m.playing+m.recording+m.slot+this.app.backgrounded;
             if(sig!==this.statusSignature){this.statusSignature=sig;this.refreshStatus();}
         }
         refreshStatus() {
             this.status.replaceChildren();for(const [id,m] of this.app.auto.modes)this.status.append(button(()=>`${LABELS[id]} ${m.mode==='hold'?translateUI('鎖定'):translateUI('連發')} ×`,()=>this.setMode(id,'none')));
-            if(this.app.racing.afk)this.status.append(button(()=>'AFK ×',()=>{this.app.racing.stop();this.refresh();}));
             const m=this.app.macro;if(m.playing||m.recording)this.status.append(button(()=>(translateUI("巨集 ")+String(m.slot)+" "+String(m.recording?translateUI('錄製'):this.app.backgrounded?translateUI('背景播放中'):translateUI('播放'))+" ■"),()=>{m.stop('button');this.refresh();}));
             this.refreshRecordingControls();
             this.macroSlots.forEach((b,i)=>{const data=this.p.macros[i+1];b.classList.toggle('on',m.slot===i+1);setText(b,()=>`${i+1}${data.events.length?' •':''}${data.name?' '+data.name:''}`);setLabel(b,'title',()=>data.name||(translateUI("槽位 ")+String(i+1)));});
             this.macroName.disabled=this.importBtn.disabled=!!this.macroBusy();
             this.exportOne.disabled=this.exportAll.disabled=!!m.recording;
-            if(this.app.shadow.activeElement!==this.macroName||this.macroName.dataset.slot!==String(m.slot)){this.macroName.value=this.p.macros[m.slot].name||'';this.macroName.dataset.slot=String(m.slot);}
+            if(this.app.shadow.activeElement!==this.macroName||this.macroName.dataset.slot!==String(m.slot)){this.macroName.value=(this.app.advanced?.draft&&this.app.advanced.editSlot===m.slot?this.app.advanced.draft:this.p.macros[m.slot]).name||'';this.macroName.dataset.slot=String(m.slot);}
             if(this.importApply){this.importApply.disabled=this.importSource.disabled=!!this.macroBusy();this.importTarget.disabled=this.macroBusy()||this.importSource.value==='all';}
-            this.afkBtn.classList.toggle('on',this.app.racing.afk);setText(this.afkBtn,()=>this.app.racing.afk?translateUI('停止 AFK 擺頭'):translateUI('啟動 AFK 擺頭'));
         }
         refreshRecordingControls() {
             const m=this.app.macro,physical=this.p.macroRecordSource==='physical',monitor=this.app.physical;
@@ -1402,7 +1419,7 @@
             this.app.touch?.sync();
             this.root.classList.toggle('collapsed',this.collapsed);this.helpBtn.classList.add('help-toggle');this.root.classList.toggle('help-off',!this.p.showHelp);this.app.racingView?.area.classList.toggle('help-off',!this.p.showHelp);
             this.helpBtn.classList.toggle('on',this.p.showHelp);this.helpBtn.setAttribute('aria-pressed',String(this.p.showHelp));setLabel(this.helpBtn,'title',()=>this.p.showHelp?translateUI('隱藏操作說明'):translateUI('顯示操作說明'));
-            this.macroQuick.classList.toggle('on',this.tab==='macro'&&!this.collapsed);this.macroQuick.setAttribute('aria-expanded',String(this.tab==='macro'&&!this.collapsed));
+            this.macroQuick.classList.toggle('on',!!this.app.advanced?.macroWindow&&!this.app.advanced.macroWindow.hidden);this.macroQuick.setAttribute('aria-expanded',String(!!this.app.advanced?.macroWindow&&!this.app.advanced.macroWindow.hidden));
             this.toolBtn.classList.toggle('on',this.tab==='settings'&&!this.collapsed);this.toolBtn.setAttribute('aria-expanded',String(this.tab==='settings'&&!this.collapsed));
             const racing=this.p.gameMode==='racing';this.root.classList.toggle('compact',racing);
             const touch=this.p.controlStyle==='touch'||racing;
@@ -1419,7 +1436,7 @@
             setText(this.modeBtn,()=>racing?translateUI('賽車'):translateUI('標準'));setText(this.collapseBtn,()=>this.collapsed?translateUI('展開'):translateUI('收合'));
             this.controls.hidden=this.collapsed||touch;this.help.hidden=this.collapsed;this.raceHint.hidden=this.collapsed||!racing;
             this.tabs.hidden=this.tools.hidden=this.collapsed||!this.tab;
-            for(const [key,page] of Object.entries(this.pages)){page.hidden=key!==this.tab;this.tabButtons[key].classList.toggle('on',key===this.tab);}
+            for(const [key,page] of Object.entries(this.pages)){if(key!=='macro'||!this.app.advanced?.macroWindow)page.hidden=key!==this.tab;this.tabButtons[key].classList.toggle('on',key===this.tab);}
             this.layoutSlots.forEach((b,i)=>{b.classList.toggle('on',this.p.layoutSlot===i+1);setText(b,()=>`${i+1}${this.p.layoutNames[i+1]?' '+this.p.layoutNames[i+1]:''}`);setLabel(b,'title',()=>this.p.layoutNames[i+1]||(translateUI("佈局 ")+String(i+1)));});
             setText(this.editBtn,()=>this.app.layout.editing?translateUI('完成編輯'):translateUI('開始編輯'));this.editBtn.classList.toggle('on',this.app.layout.editing);
             setText(this.groupBtn,()=>this.app.layout.group?translateUI('群組移動'):translateUI('單顆移動'));setText(this.snapBtn,()=>this.app.layout.snap?translateUI('磁吸 10px'):translateUI('自由移動'));
@@ -1495,12 +1512,13 @@
             .quickbar button{display:block;width:100%;margin:3px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.v15-diagnostics{white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.6 monospace;user-select:text}
             `;app.shadow.append(style);
             this.addPage('input',()=>translateUI('輸入'),this.inputPage());this.addPage('shortcuts',()=>translateUI('快捷／保護'),this.shortcutPage());this.addPage('backup',()=>translateUI('備份'),this.backupPage());this.addPage('diagnostics',()=>translateUI('診斷'),this.diagnosticPage());
-            this.panel.pages.macro.append(this.editorPage());this.panel.pages.layout.append(this.layoutPage());
+            this.panel.pages.macro.append(this.editorPage());this.mountMacroWindow();this.panel.pages.layout.append(this.layoutPage());
             this.touchSettings=this.touchSettingsPage();this.panel.pages.layout.append(this.touchSettings);
             this.quickbar=el('aside','quickbar');setLabel(this.quickbar,"aria-label",()=>translateUI('巨集快捷列'));
             this.quickToggle=button(()=>translateUI('巨集 ▸'),()=>{this.p.quickbarCollapsed=!this.p.quickbarCollapsed;app.config.save();this.syncQuickbar();});this.quickItems=el('div');this.quickButtons=[];
-            for(let s=1;s<=6;s++){const b=button(()=>`${s}`,()=>app.playMacro(false,s));this.quickButtons.push(b);this.quickItems.append(b);}
-            this.quickItems.append(button(()=>translateUI('■ 全停'),()=>app.stopAll(),'danger'));this.quickbar.append(this.quickToggle,this.quickItems);app.shadow.append(this.quickbar);
+            for(let s=1;s<=6;s++){const b=button(()=>`${s}`,()=>{if(app.macro.playing&&app.macro.slot===s){app.macro.stop('button');this.panel.refresh();}else app.playMacro(this.p.quickbarLoop,s);});this.quickButtons.push(b);this.quickItems.append(b);}
+            this.quickLoop=button(()=>'',()=>{this.p.quickbarLoop=!this.p.quickbarLoop;app.config.save();this.syncQuickbar();});this.quickItems.prepend(this.quickLoop);
+            this.quickItems.append(button(()=>translateUI('新增／管理巨集'),()=>this.toggleMacroWindow(true)));this.quickItems.append(button(()=>translateUI('■ 全停'),()=>app.stopAll(),'danger'));this.quickbar.append(this.quickToggle,this.quickItems);app.shadow.append(this.quickbar);this.quickGrip=el('div','float-grip','⠿');setLabel(this.quickGrip,'aria-label',()=>translateUI('拖曳快捷列'));this.quickbar.prepend(this.quickGrip);this.bindFloating(this.quickGrip,this.quickbar,'quickbarPos',true);this.placeFloating(this.quickbar,'quickbarPos',true);
             app.signal.addEventListener('abort',()=>{this.fileToken++;for(const url of this.urls)URL.revokeObjectURL(url);this.urls.clear();},{once:true});
             this.panel.refresh();this.syncQuickbar();
         }
@@ -1547,6 +1565,7 @@
         shortcutPage() {
             const page=el('div'),c=this.card(()=>translateUI('巨集快捷啟動'),page);this.shortcutMessage=this.message(c);
             const toggle=(key,on)=>this.attempt(this.shortcutMessage,()=>this.saveChange(()=>this.p[key]=on));
+            c.append(button(()=>translateUI('重設巨集視窗與快捷列位置'),()=>{this.p.macroWindowPos=null;this.p.quickbarPos=null;this.app.config.save();this.placeFloating(this.macroWindow,'macroWindowPos');this.placeFloating(this.quickbar,'quickbarPos',true);}));
             this.check(c,()=>translateUI('鍵盤巨集快捷鍵'),this.p.keyboardMacros,v=>toggle('keyboardMacros',v));this.check(c,()=>translateUI('手把組合鍵巨集'),this.p.comboMacros,v=>toggle('comboMacros',v));this.check(c,()=>translateUI('顯示側邊巨集快捷列'),this.p.showQuickbar,v=>toggle('showQuickbar',v));
             c.append(el('div','hint',()=>translateUI('鍵盤與組合鍵預設關閉。組合鍵不會吃掉原遊戲輸入；有衝突時請關閉。按住只啟動一次，放開後才能再觸發；輸入文字時不啟動鍵盤巨集。')));
             const keyValues=[...Array.from({length:10},(_,i)=>`F${i+3}`),...Array.from({length:26},(_,i)=>`Key${String.fromCharCode(65+i)}`),...Array.from({length:10},(_,i)=>`Digit${i}`)].map(v=>[v,v]);
@@ -1566,38 +1585,103 @@
             this.number(safety,()=>translateUI('巨集播放上限（秒，0＝關閉）'),this.p.playbackLimit,0,3600,1,v=>this.attempt(this.shortcutMessage,()=>this.saveChange(()=>this.p.playbackLimit=v)));
             safety.append(el('div','hint',()=>translateUI('長按保護只限制手動觸控按鍵／油門，不限制刻意鎖定或連發。失焦或隱藏分頁時依「背景繼續播放巨集」設定處理；離線或離開頁面時全停。全螢幕切換會取消觸控操作。')));return page;
         }
+        mountMacroWindow() {
+            const css=el('style');css.textContent=`
+            .macro-window{position:fixed;z-index:20;pointer-events:auto;width:min(600px,calc(100vw - 16px));max-height:calc(100dvh - 16px);background:#111c29f5;color:#e2edf5;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 40px #0008;overflow:auto;padding:10px;box-sizing:border-box;font:12px/1.4 system-ui}
+            .float-header{display:flex;align-items:center;gap:6px;position:sticky;top:-10px;background:#111c29;z-index:3;padding:6px 0}.float-grip{cursor:move;touch-action:none;user-select:none;padding:5px 12px;color:#9dc9e8}.float-header .float-grip{flex:1}.macro-window .setting input{max-width:65%}.macro-window .slots{display:flex;gap:3px}.macro-window .slots button{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis}.macro-window .v15-card{padding:7px}.macro-window button{touch-action:manipulation}.macro-window .edit-step{border:1px solid var(--line);border-radius:8px;padding:8px;margin:7px 0}.macro-window .edit-step .row{flex-wrap:wrap;gap:4px}.edit-value{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin:6px 0}.edit-value input[type=range]{width:145px;padding:0}.edit-time{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:5px 0}.edit-time input{width:85px}.field-error{color:#ff9a9a;font-size:11px}.edit-invalid{outline:2px solid #ff6868!important}.editor-alert{position:sticky;top:34px;z-index:2;background:#4a1823;color:#ffdbe1;padding:8px;border:1px solid #ff6868;border-radius:6px}.editor-alert:empty{display:none}.editor-summary{display:block;font-weight:bold;margin:6px 0}.quickbar{max-height:calc(100dvh - 16px);box-sizing:border-box}.quickbar .float-grip{text-align:center;padding:2px}.quickbar .on{border-color:#65e9af}
+            @media(max-width:390px){.macro-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.macro-window{padding:7px}.macro-window .float-header{top:-7px}}
+            `;this.app.shadow.append(css);
+            this.macroWindow=el('section','macro-window');this.macroWindow.hidden=true;this.macroWindow.setAttribute('role','region');setLabel(this.macroWindow,'aria-label',()=>translateUI('巨集工作室'));
+            const header=el('div','float-header'),grip=el('div','float-grip',()=>translateUI('⠿ 巨集工作室'));
+            const help=el('div','meta');help.hidden=true;setText(help,()=>translateUI('編輯只修改暫存草稿，儲存後才取代原巨集。關閉視窗會保留草稿，錄製與播放仍繼續。簡易模式修改按住時間時，預設連同後續動作一起移動；只改此動作可保留同時按鍵。'));
+            header.append(grip,button('?',()=>help.hidden=!help.hidden),button(()=>translateUI('重設位置'),()=>{this.p.macroWindowPos=null;this.app.config.save();this.placeFloating(this.macroWindow,'macroWindowPos');}),button('×',()=>this.toggleMacroWindow(false)));
+            this.macroWindow.append(header,help,this.panel.pages.macro);this.app.shadow.append(this.macroWindow);this.panel.pages.macro.hidden=false;
+            this.bindFloating(grip,this.macroWindow,'macroWindowPos');
+            window.addEventListener('resize',()=>{this.fitFloating(this.macroWindow,'macroWindowPos');this.fitFloating(this.quickbar,'quickbarPos',true);},{signal:this.app.signal});
+        }
+        toggleMacroWindow(open=this.macroWindow.hidden) {
+            this.macroWindow.hidden=!open;if(open){this.panel.pages.macro.hidden=false;this.placeFloating(this.macroWindow,'macroWindowPos');this.panel.refreshStatus();}
+            this.panel.macroQuick.classList.toggle('on',open);this.panel.macroQuick.setAttribute('aria-expanded',String(open));
+        }
+        placeFloating(node,key,snap=false) {
+            if(!node)return;const p=this.p[key];node.style.right='auto';node.style.left=p?.x||`${snap?Math.max(8,innerWidth-145):Math.max(8,(innerWidth-600)/2)}px`;node.style.top=p?.y||(snap?'35%':'40px');this.fitFloating(node,key,snap);
+        }
+        fitFloating(node,key,snap=false) {
+            if(!node||node.hidden)return;this.app.clampElement(node);
+            if(snap){const r=node.getBoundingClientRect();node.style.left=`${r.left+r.width/2<innerWidth/2?8:Math.max(8,innerWidth-r.width-8)}px`;}
+        }
+        bindFloating(grip,node,key,snap=false) {
+            this.app.dragElement(grip,node,()=>{this.fitFloating(node,key,snap);this.p[key]={x:node.style.left,y:node.style.top};this.app.config.save();});
+        }
         editorPage() {
-            const c=this.card(()=>translateUI('巨集時間軸編輯器'));this.editorMessage=this.message(c);
-            c.append(button(()=>translateUI('開啟目前槽位草稿'),()=>{try{this.requireIdle();if(this.draft&&!ask(translateUI('捨棄目前草稿並重新載入？')))return;this.editSlot=this.app.macro.slot;this.draft=clone(this.p.macros[this.editSlot]);this.editPage=0;this.renderEditor();setText(this.editorMessage,()=>(translateUI("正在編輯槽位 ")+String(this.editSlot)+translateUI("，尚未取代原巨集。")));}catch(e){setText(this.editorMessage,()=>translateUI(e.message));}}));
+            const c=this.card(()=>translateUI('巨集時間軸編輯器'));this.editorMessage=this.message(c);this.editorMessage.classList.add('editor-alert');this.editorMessage.setAttribute('role','alert');
+            c.append(button(()=>translateUI('編輯此巨集'),()=>{try{
+                this.requireIdle();if(this.draft){if(this.editSlot===this.app.macro.slot){this.renderEditor();return;}if(!ask(translateUI('捨棄目前草稿並重新載入？')))return;}
+                this.editSlot=this.app.macro.slot;this.model=new MacroDraft(this.p.macros[this.editSlot]);this.draft=this.model.data;this.editPage=0;this.editMode=this.p.macroEditModes[this.editSlot];this.shiftFollowing=true;this.editErrors=new Map();this.renderEditor();this.panel.macroName.value=this.draft.name;this.panel.refreshStatus();
+            }catch(e){setText(this.editorMessage,()=>translateUI(e.message));}}));
             this.editorBody=el('div');c.append(this.editorBody);
             this.speedSelect=this.select(c,()=>translateUI('播放速度'),[[.25,'0.25×'],[.5,'0.5×'],[.75,'0.75×'],[1,'1×'],[1.5,'1.5×'],[2,'2×'],[3,'3×']],this.p.macroSpeed,v=>this.attempt(this.editorMessage,()=>this.saveChange(()=>this.p.macroSpeed=Number(v))));return c;
         }
+        editorRows() {return this.editMode==='fine'?this.draft.events.map((e,i)=>({start:e,end:null,index:i})):this.model.actions();}
+        editorTotal() {this.model.sync();if(this.totalLabel)setText(this.totalLabel,()=>`${translateUI('總時長')} ${(this.draft.duration/1000).toFixed(1)} ${translateUI('秒')}`);}
+        editorNumber(parent,label,owner,field,value,min,max,commit,read=()=>value) {
+            const wrap=el('div','edit-time'),input=el('input'),error=el('span','field-error');input.type='number';input.min=min;input.max=max;input.step='any';input.required=true;
+            const key=owner===this.model?'tail':`${this.draft.events.indexOf(owner)}:${field}`;
+            // Raw invalid text survives page/mode changes. Untouched formatted values never overwrite recorded precision.
+            input.value=this.editErrors.get(key)?.raw??(this.editMode==='fine'?String(value):(value>0&&value<.1?.1:value).toFixed(1));setLabel(input,'aria-label',()=>translateUI(label));
+            const validate=()=>{const bad=input.value===''||!input.checkValidity();input.classList.toggle('edit-invalid',bad);input.setAttribute('aria-invalid',String(bad));setText(error,()=>bad?`${translateUI('有效範圍')} ${min}–${max} ${translateUI('秒')}`:'');
+                if(bad)this.editErrors.set(key,{raw:input.value,owner,field,label});else{this.editErrors.delete(key);if(!this.editErrors.size)setText(this.editorMessage,()=>'');}return !bad;};
+            input.oninput=validate;input.onchange=()=>{if(validate()){commit(Number(input.value));this.editorTotal();for(const b of this.editorTimeBindings||[]){if(b.input!==input&&!this.editErrors.has(b.key)){const v=b.read();b.input.value=this.editMode==='fine'?String(v):(v>0&&v<.1?.1:v).toFixed(1);}}}};
+            const adjust=delta=>{const current=Number(input.value);input.value=String(Math.round(clamp((Number.isFinite(current)?current:value)+delta,min,max)*1000)/1000);input.onchange();};
+            wrap.append(el('span','',()=>translateUI(label)),button('−',()=>adjust(this.editMode==='fine'?-.001:-.1)),input,button('+',()=>adjust(this.editMode==='fine'?.001:.1)),error);parent.append(wrap);if(this.editMode==='simple'&&value>0&&value<.1)wrap.append(el('span','meta',()=>translateUI('短按（原始時間保留）')));if(this.editErrors.has(key))validate();this.editorTimeBindings.push({input,key,read});return input;
+        }
+        editorValue(parent,event,release=null) {
+            const row=el('div','edit-value');parent.append(row);
+            if(event.type==='btn'&&event.id!==6&&event.id!==7){const b=button(()=>event.val>0?translateUI('按住'):translateUI('放開'),()=>{event.val=event.val>0?0:1;this.renderEditor();});b.setAttribute('aria-pressed',String(event.val>0));row.append(b);return;}
+            const axis=event.type==='axis',vertical=axis&&event.id%2===1;let sign=event.val<0?-1:1;
+            if(axis){const direction=el('select');for(const [v,label] of [[-1,vertical?'上':'左'],[1,vertical?'下':'右']]){const o=el('option','',()=>translateUI(label));o.value=v;direction.append(o);}direction.value=event.val<0?-1:1;setLabel(direction,'aria-label',()=>translateUI('方向'));direction.onchange=()=>{sign=Number(direction.value);event.val=Math.abs(event.val)*sign;};row.append(direction);}
+            const slider=el('input');slider.type='range';slider.min=0;slider.max=100;slider.step=1;slider.value=Math.abs(event.val)*100;setLabel(slider,'aria-label',()=>translateUI(axis?'搖桿幅度':'按壓深度'));
+            const out=el('output','',`${Math.round(Math.abs(event.val)*100)}%`);
+            const apply=v=>{event.val=v*(axis?sign:1);slider.value=v*100;setText(out,()=>`${Math.round(Math.abs(event.val)*100)}%`);};slider.oninput=()=>apply(Number(slider.value)/100);row.append(slider,out);
+            for(const [v,label] of [[0,axis?'回中':'放開'],[1/3,'⅓'],[.5,'½'],[2/3,'⅔'],[1,axis?'全推':'全按']])row.append(button(()=>translateUI(label),()=>apply(v)));
+        }
         renderEditor() {
-            const body=this.editorBody;body.replaceChildren();if(!this.draft)return;
-            const d=this.draft,info=el('div','meta',()=>(translateUI("草稿：槽位 ")+String(this.editSlot)+" · "+String(d.events.length)+translateUI(" 筆")));body.append(info);
-            const name=el('input');name.type='text';name.maxLength=60;name.value=d.name;setLabel(name,"aria-label",()=>translateUI('草稿名稱'));name.onchange=()=>d.name=name.value.trim();body.append(name);
-            this.number(body,()=>translateUI('總長度（秒，包含結尾等待）'),d.duration/1000,0,86400,.001,v=>d.duration=v*1000);
-            const scroll=el('div','v15-scroll'),table=el('table','v15-table'),head=el('tr');[()=>translateUI('時間（秒）'),()=>translateUI('動作'),()=>translateUI('按鍵／軸'),()=>translateUI('數值'),''].forEach(t=>head.append(el('th','',()=>translateUI(t))));table.append(head);
-            const pageSize=40,pages=Math.max(1,Math.ceil(d.events.length/pageSize));this.editPage=clamp(this.editPage,0,pages-1);
-            for(let i=this.editPage*pageSize;i<Math.min(d.events.length,(this.editPage+1)*pageSize);i++){
-                const event=d.events[i],tr=el('tr');const cell=node=>{const td=el('td');td.append(node);tr.append(td);};
-                const time=el('input');time.type='number';time.required=true;time.min=0;time.max=86400;time.step=.001;time.value=(event.t/1000).toFixed(3);setLabel(time,"aria-label",()=>(translateUI("步驟 ")+String(i+1)+translateUI(" 時間")));
-                time.onchange=()=>{if(time.value===''||!time.checkValidity()){setText(this.editorMessage,()=>translateUI('時間需為有效的非負數。'));return;}event.t=Number(time.value)*1000;};cell(time);
-                const type=el('select');for(const [value,label] of [['btn',()=>translateUI('按鍵')],['axis',()=>translateUI('搖桿')]]){const o=el('option','',()=>translateUI(label));o.value=value;type.append(o);}type.value=event.type;setLabel(type,"aria-label",()=>(translateUI("步驟 ")+String(i+1)+translateUI(" 類型")));
-                type.onchange=()=>{event.type=type.value;event.id=0;event.val=0;this.renderEditor();};cell(type);
-                const id=el('select');(event.type==='btn'?LABELS:['LS X','LS Y','RS X','RS Y']).forEach((label,value)=>{const o=el('option','',()=>translateUI(label));o.value=value;id.append(o);});id.value=event.id;id.onchange=()=>event.id=Number(id.value);setLabel(id,"aria-label",()=>(translateUI("步驟 ")+String(i+1)+translateUI(" 按鍵")));cell(id);
-                const value=el('input');value.type='number';value.required=true;value.min=event.type==='btn'?0:-1;value.max=1;value.step='any';value.value=event.val;setLabel(value,"aria-label",()=>(translateUI("步驟 ")+String(i+1)+translateUI(" 數值")));
-                value.onchange=()=>{if(value.value===''||!value.checkValidity()){setText(this.editorMessage,()=>translateUI('數值需在按鍵 0～1 或搖桿 -1～1 範圍內。'));return;}event.val=Number(value.value);};cell(value);
-                cell(button(()=>translateUI('刪'),()=>{d.events.splice(i,1);this.renderEditor();}));table.append(tr);
+            const body=this.editorBody;body.replaceChildren();this.editorTimeBindings=[];if(!this.draft)return;
+            const d=this.draft,rows=this.editorRows(),pageSize=20,pages=Math.max(1,Math.ceil(rows.length/pageSize));this.editPage=clamp(this.editPage,0,pages-1);
+            body.append(el('div','meta',()=>`${translateUI('槽位')} ${this.editSlot} · ${d.events.length} ${translateUI('筆')}`));
+            const mode=el('div','row');for(const [v,label] of [['simple','簡易'],['fine','精細']])mode.append(button(()=>translateUI(label),()=>{if(this.editErrors.size){setText(this.editorMessage,()=>translateUI('請先修正標紅欄位。'));return;}this.editMode=v;this.editPage=0;this.renderEditor();},this.editMode===v?'on':''));body.append(mode);
+            this.check(body,()=>translateUI('連同後續一起移動'),this.shiftFollowing,v=>{this.shiftFollowing=v;});
+            body.append(el('div','meta',()=>this.shiftFollowing?translateUI('修改按住時間時，後續動作跟著移動。'):translateUI('只改此動作：其他時間保持不變，可同時按鍵。')));
+            this.totalLabel=el('output','editor-summary');body.append(this.totalLabel);this.editorTotal();
+            this.editorNumber(body,'結尾等待',this.model,'tail',this.model.tail/1000,0,Math.max(0,(86400000-this.model.last())/1000),v=>this.model.tail=v*1000,()=>this.model.tail/1000);
+            for(let r=this.editPage*pageSize;r<Math.min(rows.length,(this.editPage+1)*pageSize);r++){
+                const action=rows[r],e=action.start,card=el('section','edit-step');card.dataset.event=String(this.draft.events.indexOf(e));
+                card.append(el('strong','',()=>`${r+1}. ${e.type==='btn'?LABELS[e.id]:['LS X','LS Y','RS X','RS Y'][e.id]}`));
+                this.editorNumber(card,'開始時間',e,'time',e.t/1000,0,Math.max(0,(86400000-(action.end?action.end.t-e.t:0))/1000),v=>this.model.move(action,v*1000,this.editMode==='simple'&&this.shiftFollowing),()=>e.t/1000);
+                if(this.editMode==='simple'){const prior=r?rows[r-1]:null,priorEnd=prior?(prior.end||prior.start).t:0;if(e.t>=priorEnd)this.editorNumber(card,'前段等待',e,'gap',(e.t-priorEnd)/1000,0,Math.max(0,(86400000-priorEnd)/1000),v=>this.model.move(action,priorEnd+v*1000,this.shiftFollowing),()=>Math.max(0,(e.t-(prior?(prior.end||prior.start).t:0))/1000));}
+                if(action.end){
+                    this.editorNumber(card,'按住時間',e,'hold',(action.end.t-e.t)/1000,.001,Math.max(.001,(86400000-e.t)/1000),v=>this.model.duration(action,v*1000,this.shiftFollowing),()=>(action.end.t-e.t)/1000);
+                    const presets=el('div','row');for(const [ms,label] of [[80,'短按'],[100,'0.1 s'],[500,'0.5 s'],[1000,'1.0 s']])presets.append(button(()=>translateUI(label),()=>{const key=`${d.events.indexOf(e)}:hold`;this.editErrors.delete(key);this.model.duration(action,ms,this.shiftFollowing);if(!this.editErrors.size)setText(this.editorMessage,()=>'');this.renderEditor();}));card.append(presets);
+                }else this.editorValue(card,e);
+                const controls=el('div','row'),kind=el('select');for(const [v,label] of [['btn','按鍵'],['axis','搖桿']]){const o=el('option','',()=>translateUI(label));o.value=v;kind.append(o);}kind.value=e.type;setLabel(kind,'aria-label',()=>translateUI('動作類型'));
+                kind.onchange=()=>{if(this.editErrors.size){kind.value=e.type;return;}e.type=kind.value;e.id=0;e.val=0;if(action.end){action.end.type=e.type;action.end.id=0;action.end.val=0;}this.renderEditor();};
+                const id=el('select');(e.type==='btn'?LABELS:['LS X','LS Y','RS X','RS Y']).forEach((label,i)=>{const o=el('option','',label);o.value=i;id.append(o);});id.value=e.id;setLabel(id,'aria-label',()=>translateUI('按鍵／軸'));id.onchange=()=>{if(this.editErrors.size){id.value=e.id;return;}e.id=Number(id.value);if(action.end)action.end.id=e.id;this.renderEditor();};
+                const del=button(()=>translateUI('刪'),()=>{if(this.editErrors.size){setText(this.editorMessage,()=>translateUI('請先修正標紅欄位。'));return;}this.model.remove(action);this.renderEditor();});controls.append(kind,id,del);card.append(controls);body.append(card);
             }
-            scroll.append(table);body.append(scroll);const nav=el('div','row');nav.append(button(()=>translateUI('上一頁'),()=>{this.editPage--;this.renderEditor();}),el('span','meta',()=>`${this.editPage+1} / ${pages}`),button(()=>translateUI('下一頁'),()=>{this.editPage++;this.renderEditor();}));body.append(nav);
-            const row=el('div','row');row.append(button(()=>translateUI('＋ 插入動作'),()=>{if(d.events.length>=MacroBackup.MAX_EVENTS){setText(this.editorMessage,()=>translateUI('已達事件上限。'));return;}d.events.push({t:d.duration,type:'btn',id:0,val:0});this.editPage=Math.floor((d.events.length-1)/pageSize);this.renderEditor();}),button(()=>translateUI('依時間排序'),()=>{d.events.sort((a,b)=>a.t-b.t);this.renderEditor();}));
-            const shift=el('input');shift.type='number';shift.value=0;shift.step=.001;setLabel(shift,"aria-label",()=>translateUI('整段平移秒數'));row.append(shift,button(()=>translateUI('整段平移'),()=>{const delta=Number(shift.value)*1000;if(shift.value===''||!Number.isFinite(delta)||d.duration+delta<0||d.events.some(e=>e.t+delta<0)){setText(this.editorMessage,()=>translateUI('平移後不可產生負時間。'));return;}d.events.forEach(e=>e.t+=delta);d.duration+=delta;this.renderEditor();}));body.append(row);
-            body.append(el('div','hint',()=>translateUI('0＝放開；按鍵／LT／RT 數值 0～1，搖桿 -1～1。保留同時動作的原順序。總長度不得早於最後一步；過長清單分頁顯示。')));
-            const actions=el('div','row');actions.append(button(()=>translateUI('儲存並取代原巨集'),()=>this.attempt(this.editorMessage,()=>{
-                this.requireIdle();if(body.querySelector('input:invalid'))throw Error(translateUI('請先修正草稿的無效數值。'));
-                MacroTimeline.normalize(d);if(!ask((translateUI("以草稿取代槽位 ")+String(this.editSlot)+translateUI(" 的巨集？"))))return false;MacroTimeline.save(this.app.config,this.editSlot,d);this.draft=null;this.renderEditor();
-            })),button(()=>translateUI('捨棄草稿'),()=>{if(ask(translateUI('捨棄未儲存的草稿？'))){this.draft=null;this.renderEditor();setText(this.editorMessage,()=>translateUI('草稿已捨棄，原巨集不變。'));}}));body.append(actions);
+            const nav=el('div','row'),prev=button(()=>translateUI('上一頁'),()=>{this.editPage--;this.renderEditor();}),next=button(()=>translateUI('下一頁'),()=>{this.editPage++;this.renderEditor();});prev.disabled=this.editPage===0;next.disabled=this.editPage===pages-1;nav.append(prev,el('span','meta',`${this.editPage+1} / ${pages}`),next);body.append(nav);
+            if(this.editMode==='fine'){
+                const tools=el('div','row');tools.append(button(()=>translateUI('依時間排序'),()=>{if(this.editErrors.size)return;d.events.sort((a,b)=>a.t-b.t);this.renderEditor();}));
+                const shift=el('input');shift.type='number';shift.step=.001;shift.value=0;setLabel(shift,'aria-label',()=>translateUI('整段平移秒數'));tools.append(shift,button(()=>translateUI('整段平移'),()=>{const delta=Number(shift.value)*1000;if(this.editErrors.size||shift.value===''||!Number.isFinite(delta)||d.events.some(e=>e.t+delta<0)||this.model.last()+this.model.tail+delta>86400000){setText(this.editorMessage,()=>translateUI('平移後不可產生負時間。'));return;}d.events.forEach(e=>e.t+=delta);this.renderEditor();}));body.append(tools);
+            }
+            const actions=el('div','row');actions.append(button(()=>translateUI('＋ 插入動作'),()=>{if(d.events.length+2>MacroBackup.MAX_EVENTS)return;const t=this.model.last();d.events.push({t,type:'btn',id:0,val:1},{t:t+100,type:'btn',id:0,val:0});this.model.sync();this.editPage=Math.floor((this.editorRows().length-1)/pageSize);this.renderEditor();}),button(()=>translateUI('儲存並取代原巨集'),()=>this.saveEditor()),button(()=>translateUI('捨棄草稿'),()=>{if(ask(translateUI('捨棄未儲存的草稿？'))){this.draft=null;this.renderEditor();this.panel.refreshStatus();setText(this.editorMessage,()=>translateUI('草稿已捨棄，原巨集不變。'));}}));body.append(actions);
+            if(this.focusError){const error=this.focusError;this.focusError=null;const target=error.owner===this.model?body.querySelector('.edit-invalid'):body.querySelector(`[data-event="${d.events.indexOf(error.owner)}"] .edit-invalid`);target?.scrollIntoView({block:'center'});target?.focus();}
+        }
+        saveEditor() {
+            try{
+                this.requireIdle();for(const e of this.draft.events)if(!Number.isFinite(e.t)||e.t<0||e.t>86400000)this.editErrors.set(`${this.draft.events.indexOf(e)}:time`,{raw:String(e.t/1000),owner:e,field:'time'});if(this.model.last()+this.model.tail>86400000)this.editErrors.set('tail',{raw:String(this.model.tail/1000),owner:this.model,field:'tail'});if(this.editErrors.size){const error=this.editErrors.values().next().value;if(error.owner!==this.model&&this.editMode==='simple'&&this.editorRows().some(r=>r.end===error.owner))this.editMode='fine';const rows=this.editorRows(),index=rows.findIndex(r=>r.start===error.owner||r.end===error.owner);this.editPage=Math.floor(Math.max(0,index)/20);this.focusError=error;this.renderEditor();setText(this.editorMessage,()=>`${translateUI('尚未儲存：請修正第')} ${Math.max(1,index+1)} ${translateUI('筆標紅欄位。')}`);return;}
+                this.model.sync();MacroTimeline.normalize(this.draft);if(!ask(`${translateUI('以草稿取代槽位')} ${this.editSlot}？`))return;
+                const previousMode=this.p.macroEditModes[this.editSlot];this.p.macroEditModes[this.editSlot]=this.editMode;try{MacroTimeline.save(this.app.config,this.editSlot,this.draft);}catch(error){this.p.macroEditModes[this.editSlot]=previousMode;throw error;}this.draft=null;this.renderEditor();this.panel.refreshStatus();this.syncQuickbar();setText(this.editorMessage,()=>translateUI('已儲存。'));
+            }catch(e){setText(this.editorMessage,()=>translateUI(e.message));}
         }
         layoutPage() {
             const c=this.card(()=>translateUI('佈局管理'));this.layoutMessage=this.message(c);this.layoutName=el('input');this.layoutName.type='text';this.layoutName.maxLength=60;setLabel(this.layoutName,"aria-label",()=>translateUI('佈局名稱'));this.layoutName.value=this.p.layoutNames[this.p.layoutSlot];
@@ -1663,7 +1747,7 @@
             for(let s=1;s<=6;s++)preview.append(el('div','meta',()=>(translateUI("巨集 ")+String(s)+"："+String(data.macros[s].name||translateUI('未命名'))+"，"+String(data.macros[s].events.length)+translateUI(" 筆；佈局 ")+String(s)+"："+String(data.layoutNames[s]||translateUI('未命名'))+translateUI("，面板 ")+String(Object.keys(data.layouts[s]).length)+translateUI("／觸控 ")+String(Object.keys(data.touchLayouts[s]).length)+translateUI(" 個位移"))));
             const choices={};for(const [key,label] of [['macros',()=>translateUI('六組巨集')],['layouts',()=>translateUI('六組佈局與名稱')],['settings',()=>translateUI('介面／曲線／映射／快捷設定')]])if(allowed.includes(key))choices[key]=this.check(preview,()=>(translateUI("還原")+String(translateUI(label))),true,()=>{});
             this.restoreButton=button(()=>translateUI('確認還原所選項目'),()=>{try{this.requireIdle();const groups=Object.keys(choices).filter(k=>choices[k].checked);if(!groups.length)throw Error(translateUI('請至少選一項。'));if(!ask((translateUI("取代目前的 ")+String(groups.join('、'))+translateUI("？空槽也會覆蓋原資料。"))))return;
-                this.app.stopAll();ConfigurationBackup.commit(this.app.config,data,groups);this.fileToken++;this.restorePending=false;preview.hidden=true;this.draft=null;this.renderEditor();this.app.layout.apply();this.app.viewer.resize();this.app.changeModeAfterRestore?.();this.app.setLanguage(this.p.language);this.panel.languageSelect.value=this.p.language;this.panel.refresh();this.refreshControls();this.syncQuickbar();setText(this.backupMessage,()=>translateUI('已還原所選資料；自動操作維持停止。'));
+                this.app.stopAll();ConfigurationBackup.commit(this.app.config,data,groups);this.fileToken++;this.restorePending=false;preview.hidden=true;this.draft=null;this.renderEditor();this.app.layout.apply();this.app.viewer.resize();this.app.changeModeAfterRestore?.();this.placeFloating(this.macroWindow,'macroWindowPos');this.placeFloating(this.quickbar,'quickbarPos',true);this.app.setLanguage(this.p.language);this.panel.languageSelect.value=this.p.language;this.panel.refresh();this.refreshControls();this.syncQuickbar();setText(this.backupMessage,()=>translateUI('已還原所選資料；自動操作維持停止。'));
             }catch(e){setText(this.backupMessage,()=>translateUI(e.message));}});preview.append(this.restoreButton,button(()=>translateUI('取消還原'),()=>{this.fileToken++;this.restorePending=false;preview.hidden=true;setText(this.backupMessage,()=>translateUI('已取消，資料沒有變更。'));}));setText(message,()=>translateUI('檔案驗證完成。'));this.panel.refresh();
         }
         refreshControls() {
@@ -1693,8 +1777,8 @@
             this.diagnostics=el('pre','v15-diagnostics');c.append(this.diagnostics,button(()=>translateUI('清除虛擬輸入／全停'),()=>this.app.stopAll(),'danger'));return page;
         }
         syncQuickbar() {
-            if(!this.quickbar)return;this.quickbar.hidden=!this.p.showQuickbar;this.quickItems.hidden=this.p.quickbarCollapsed;setText(this.quickToggle,()=>this.p.quickbarCollapsed?translateUI('巨集 ▸'):translateUI('巨集 ▾'));this.quickToggle.setAttribute('aria-expanded',String(!this.p.quickbarCollapsed));
-            this.quickButtons.forEach((b,i)=>{const m=this.p.macros[i+1];setText(b,()=>`${i+1} ${m.name||translateUI('未命名')}`);setLabel(b,'title',()=>m.name||(translateUI("巨集 ")+String(i+1)));b.disabled=this.app.macro.recording||this.app.layout.editing||!m.events.length;b.classList.toggle('on',this.app.macro.playing&&this.app.macro.slot===i+1);});
+            if(!this.quickbar)return;setText(this.quickLoop,()=>this.p.quickbarLoop?translateUI('↻ 循環'):translateUI('▶ 單次'));this.quickLoop.setAttribute('aria-pressed',String(this.p.quickbarLoop));this.quickLoop.hidden=!Object.values(this.p.macros).some(m=>m.events.length);this.quickbar.hidden=!this.p.showQuickbar;this.quickItems.hidden=this.p.quickbarCollapsed;setText(this.quickToggle,()=>this.p.quickbarCollapsed?translateUI('巨集 ▸'):translateUI('巨集 ▾'));this.quickToggle.setAttribute('aria-expanded',String(!this.p.quickbarCollapsed));this.fitFloating(this.quickbar,'quickbarPos',true);
+            this.quickButtons.forEach((b,i)=>{const m=this.p.macros[i+1];b.hidden=!m.events.length;setText(b,()=>`${this.app.macro.playing&&this.app.macro.slot===i+1&&this.app.macro.loop?'↻ ':''}${i+1} ${m.name||translateUI('未命名')}`);setLabel(b,'title',()=>m.name||(translateUI("巨集 ")+String(i+1)));b.disabled=this.app.macro.recording||this.app.layout.editing||!m.events.length;b.classList.toggle('on',this.app.macro.playing&&this.app.macro.slot===i+1);});
         }
         tick(now) {
             if(now-this.lastTick<100)return;this.lastTick=now;this.syncQuickbar();if(this.restoreButton)this.restoreButton.disabled=this.busy()||this.app.layout.editing;
@@ -1720,7 +1804,7 @@
             this.layout=new LayoutManager(this.config);this.pointers=new PointerManager(window,this.signal);this.racing=new RacingController(this);
             this.pipeline=new InputPipeline(this.config);this.virtual.pipeline=this.pipeline;
             this.rawSnapshot=this.input.snapshot.bind(this.input);this.input.snapshot=(filter)=>this.pipeline.process(this.rawSnapshot(filter));
-            this.input.recordingState=()=>this.rawSnapshot(key=>key!=='macro'&&key!=='afk');
+            this.input.recordingState=()=>this.rawSnapshot(key=>key!=='macro');
             const rawSet=this.input.set.bind(this.input),rawClear=this.input.clear.bind(this.input);
             this.input.set=(key,...args)=>{if(this.shortcuts?.blocked.has(key))return;rawSet(key,...args);};
             this.input.clear=key=>{this.shortcuts?.blocked.delete(key);rawClear(key);};
@@ -1787,7 +1871,7 @@
         leaveForeground() {
             this.backgrounded=true;this.shortcuts?.keyHeld.clear();this.shortcuts?.comboHeld.clear();
             if(!this.config.prefs.backgroundMacro||!this.macro.playing){this.suspend(this.config.prefs.backgroundMacro?'focus-idle':'focus-off');return;}
-            // Preserve only the macro source; never retain a finger, AFK or automated hold.
+            // Preserve only the macro source; never retain a finger or automated hold.
             this.pointers.cancelAll();this.panel.cancelTaps();this.auto.stop();this.racing.stop();
             for(const key of [...this.input.sources.keys()])if(key!=='macro')this.input.clear(key);
             this.panelPointers.clear();this.comboSince=null;this.comboFired=false;
@@ -1900,7 +1984,7 @@
             styleValue(this.panel.root,'transition',awake?'none':'opacity 200ms ease');
             styleValue(this.panel.root,'opacity',dim?'0.25':'1');
             if(this.touch?.active){styleValue(this.touch.root,'transition',awake?'none':'opacity 200ms ease');styleValue(this.touch.root,'opacity',dim&&raceMode?'0.25':'1');}
-            if(this.advanced?.quickbar){const race=this.config.prefs.gameMode==='racing';styleValue(this.advanced.quickbar,'top',race?'64px':'35%');styleValue(this.advanced.quickbar,'maxHeight',race?'80px':'65vh');}
+            
         }
         loop() {
             if(this.destroyed)return;
@@ -1913,7 +1997,7 @@
             const diagnosing=this.panel.tab==='diagnostics'&&!this.panel.collapsed;
             const shouldOverride=this.physical.connected&&now-this.physical.lastActivity<2500&&now>=this.manualUntil&&!this.layout.editing&&!this.pointers.busy&&!this.macro.recording&&!diagnosing;
             if(shouldOverride!==this.override){this.override=shouldOverride;if(!shouldOverride)this.panel.refresh();}
-            this.auto.tick(now);this.macro.tick(now);this.racing.tick(now);
+            this.auto.tick(now);this.macro.tick(now);
             this.shortcuts.tick(now);this.advanced.tick(now);
             const virtualState=this.rawSnapshot();
             const combo=!this.macro.recording&&((virtualState.buttons[10]>0.05&&virtualState.buttons[11]>0.05)||(this.physical.state.buttons[10]>0.05&&this.physical.state.buttons[11]>0.05));
@@ -1937,7 +2021,7 @@
 
     // 測試可載入純邏輯類別，不啟動 DOM，也不改寫真實 navigator。
     if(typeof module==='object'&&module.exports) {
-        module.exports={readDevVersion,I18n,translateUI,ConfigStore,InputManager,VirtualGamepad,PhysicalGamepadMonitor,ButtonAutomation,MacroEngine,MacroBackup,MacroTimeline,ConfigurationBackup,InputPipeline,LayoutManager,PointerManager,RacingController,App};return;
+        module.exports={readDevVersion,I18n,translateUI,ConfigStore,InputManager,VirtualGamepad,PhysicalGamepadMonitor,ButtonAutomation,MacroEngine,MacroBackup,MacroTimeline,MacroDraft,ConfigurationBackup,InputPipeline,LayoutManager,PointerManager,RacingController,App};return;
     }
     if(window.top!==window.self)return;
     // Install at document-start, before the stream registers its focus-loss handlers.
