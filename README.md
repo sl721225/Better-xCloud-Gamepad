@@ -6,11 +6,11 @@
 
 ## 版本
 - 正式版：CloudPad Studio v15.3.0，見 [Releases](https://github.com/sl721225/CloudPad-Studio/releases/latest)。
-- 開發分支：v15-development；目前為 CloudPad Studio (Dev) v15.6.3，巨集槽位切換即自動開啟時間軸，無修改直接切換；有未儲存修改時提供儲存、捨棄或取消，並保護錄製與快捷啟動的切換流程。
+- 開發分支：v15-development；目前為 CloudPad Studio (Dev) v15.7.0，重整為時間軸優先的巨集編輯器，提供右側動作設定、直接編輯等待、復原／重做、按鍵新增選單，以及不覆寫存檔的草稿試播。
 
 ## 安裝／改名升級
 1. 在 Tampermonkey 或 Violentmonkey 打開原有腳本的編輯器。
-2. 用 CloudPad-Studio.user.js 或 CloudPad-Studio-v15.6.3.txt 的完整內容取代原有程式，儲存。
+2. 用 CloudPad-Studio.user.js 或 CloudPad-Studio-v15.7.0.txt 的完整內容取代原有程式，儲存。
 3. 重新整理 Xbox 頁面。
 4. 確認只有一份 CloudPad Studio 啟用。若另裝成新腳本，先停用舊版，避免兩個手把輸出同時運作。
 
